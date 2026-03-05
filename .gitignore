@@ -1,0 +1,101 @@
+# ============================================================
+# MONOREPO — TRIPOLAR TFO
+# Backend: Python / FastAPI / uv
+# Frontend: Next.js / TypeScript
+# ============================================================
+
+
+# ============================================================
+# GLOBAL
+# ============================================================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.log
+
+
+# ============================================================
+# BACKEND — Python / FastAPI / uv
+# ============================================================
+
+# Virtual environment (uv)
+backend/.venv/
+
+# Python bytecode
+backend/**/__pycache__/
+backend/**/*.py[cod]
+backend/**/*.pyo
+
+# pytest
+backend/.pytest_cache/
+
+# ruff / mypy caches
+backend/.ruff_cache/
+backend/.mypy_cache/
+
+# Coverage
+backend/.coverage
+backend/htmlcov/
+backend/coverage.xml
+
+# Environment secrets — NUNCA a git
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# Logs de runtime
+backend/logs/
+
+# Modelos LLM locales (archivos muy pesados)
+backend/models/
+
+# SQLite databases locales
+backend/*.db
+backend/*.sqlite
+backend/*.sqlite3
+
+# Build/dist
+backend/dist/
+backend/build/
+
+
+# ============================================================
+# FRONTEND — Next.js / TypeScript
+# ============================================================
+
+# Build output
+frontend/.next/
+frontend/out/
+frontend/dist/
+
+# Dependencias
+frontend/node_modules/
+
+# Environment secrets
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Cache de herramientas
+frontend/.eslintcache
+frontend/.stylelintcache
+frontend/tsconfig.tsbuildinfo
+
+# Storybook
+frontend/storybook-static/
+
+# Claude Code skills (instaladas localmente, no pertenecen al repo)
+frontend/.agents/
+frontend/.agent/
+
+
+# ============================================================
+# GIT / CLAUDE LOCAL
+# ============================================================
+backend/.claude/
+frontend/.claude/
+.claude/
