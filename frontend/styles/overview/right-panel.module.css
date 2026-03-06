@@ -1,0 +1,154 @@
+/* ─── Right Panel Styles ─────────────────────────────────────────────── */
+
+.rightPanel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    z-index: 20;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 25%;
+    min-width: 320px;
+    max-width: 400px;
+    background: transparent;
+    /*border-left: var(--tp-stroke-width) solid var(--tp-stroke);*/
+}
+
+/* ── Card ── */
+.card {
+    border-radius: var(--tp-radius-pill);
+    background: var(--tp-bg-card);
+    padding: 10px;
+    border: 2px solid #98A6D4;
+    /* Matching NxpJT stroke */
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.timelineCard {
+    border-radius: var(--tp-radius-pill);
+    background: var(--tp-bg-card);
+    border: 2px solid #98A6D4;
+    overflow: hidden;
+    position: relative;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.cardTitle {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--tp-text-heading);
+    color: var(--tp-text-heading);
+    margin-bottom: 6px;
+}
+
+/* ── Chart helpers ── */
+.chartContainer {
+    width: 100%;
+    overflow: hidden;
+}
+
+.chartLegend {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 8px;
+}
+
+.legendDot {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    color: var(--tp-text-muted);
+}
+
+.legendDotCircle {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+/* ── Alert items ── */
+.alertItem {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 6px 0;
+}
+
+.alertIcon {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.alertIconCritical {
+    background: #FFC9C9;
+    color: #AA2323;
+}
+
+.alertIconWarning {
+    background: #FFF4C9;
+    color: #F5B82C;
+}
+
+.alertText {
+    flex: 1;
+}
+
+.alertTitle {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--tp-text-heading);
+}
+
+.alertDesc {
+    font-size: 10px;
+    color: var(--tp-text-muted);
+    margin-top: 2px;
+}
+
+/* ── Workflow status ── */
+.factoryStatus {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--tp-text-body);
+}
+
+.statusDot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+.statusOnline {
+    background: var(--tp-accent-green);
+}
+
+.statusWarning {
+    background: var(--tp-accent-warning);
+}
+
+.statusError {
+    background: var(--tp-accent-red-error);
+}

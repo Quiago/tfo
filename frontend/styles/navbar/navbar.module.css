@@ -1,0 +1,192 @@
+/* ─── Navbar Styles (using global --tp-* tokens) ─────────────── */
+
+/* ── Navbar Container ── */
+.navbar {
+    display: flex;
+    align-items: center;
+    height: 60px;
+    padding: 0 16px;
+    background: var(--tp-bg-main);
+    flex-shrink: 0;
+    position: relative;
+    z-index: 50;
+    gap: 12px;
+    border-bottom: var(--tp-stroke-width) solid var(--tp-stroke);
+    font-size: 14px;
+}
+
+/* ── Logo area ── */
+.navLogo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-right: 4px;
+    height: 40px;
+}
+
+.navLogoImg {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+}
+
+.navBrand {
+    /*font-size: 14px;*/
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--tp-text-primary);
+}
+
+/* ── Separator ── */
+.navSep {
+    width: 1px;
+    height: 20px;
+    background: var(--tp-stroke);
+    opacity: 0.4;
+}
+
+/* ── Operations label ── */
+.navOps {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-right: 4px;
+    height: 40px;
+}
+
+.navOps svg {
+    color: var(--tp-text-muted);
+}
+
+.navOpsText {
+    /*font-size: 12px;*/
+    font-weight: 500;
+    color: var(--tp-text-heading);
+}
+
+/* ── Module Icons Pill ── */
+.modulePill {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 4px;
+    height: 40px;
+    border-radius: var(--tp-radius-pill);
+    border: var(--tp-stroke-width) solid var(--tp-stroke);
+    background: var(--tp-bg-pill);
+    box-sizing: border-box;
+}
+
+.moduleBtn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: var(--tp-text-muted);
+    transition: all 0.2s ease;
+}
+
+.moduleBtn:hover {
+    color: var(--tp-text-heading);
+    background: rgba(255, 255, 255, 0.6);
+}
+
+.moduleBtnActive {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: #fff;
+    color: var(--tp-text-heading);
+    box-shadow: 0 1px 4px rgba(152, 166, 212, 0.3);
+}
+
+/* ── Search Button ── */
+.searchBtn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 16px;
+    height: 40px;
+    border-radius: 20px;
+    /*font-size: 12px;*/
+    font-weight: 500;
+    color: var(--tp-text-heading);
+    cursor: pointer;
+    background: var(--tp-bg-pill);
+    box-sizing: border-box;
+    border: var(--tp-stroke-width) solid var(--tp-stroke);
+}
+
+.searchBtn:hover {
+    background: var(--tp-bg-card);
+}
+
+/* ── Spacer ── */
+.spacer {
+    flex: 1;
+}
+
+/* ── Factory Selector Pill ── */
+.factoryPill {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 16px;
+    height: 40px;
+    border-radius: var(--tp-radius-pill);
+    border: var(--tp-stroke-width) solid var(--tp-stroke);
+    background: var(--tp-bg-pill);
+    /*font-size: 12px;*/
+    font-weight: 600;
+    color: var(--tp-text-heading);
+    cursor: pointer;
+    transition: background 0.2s ease;
+    box-sizing: border-box;
+}
+
+.factoryPill:hover {
+    background: var(--tp-bg-card);
+}
+
+.factoryPill svg {
+    color: var(--tp-stroke);
+}
+
+/* ── User Section ── */
+.userSection {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-left: 12px;
+    margin-left: 4px;
+    border-left: 1px solid rgba(152, 166, 212, 0.4);
+    height: 40px;
+}
+
+.userAvatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    object-fit: contain;
+    padding: 2px;
+    border: 1px solid rgba(152, 166, 212, 0.4);
+}
+
+.userName {
+    /*font-size: 12px;*/
+    font-weight: 500;
+    color: var(--tp-text-heading);
+}
+
+.userChevron {
+    color: var(--tp-text-muted);
+}

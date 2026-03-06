@@ -1,0 +1,258 @@
+/* Main Container */
+.overlayContainer {
+    position: relative;
+    width: 480px;
+    /* Wider to accommodate the design from SVG */
+    border-radius: 18px;
+    background: #E9ECF3;
+    /* Light background as requested */
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+    /* Softer shadow for light theme */
+    overflow: hidden;
+    font-family: 'Inter', sans-serif;
+    /* Assuming standard font */
+    color: #1F2937;
+    /* Dark text for legibility */
+    /* Optional: Add a subtle border matching the design if needed */
+}
+
+/* Gradient Background Layout */
+.gradientBackground {
+    position: absolute;
+    inset: 0;
+    /* Optional: very subtle gradient or just transparent if solid color preferred */
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0) 100%);
+    z-index: 0;
+    pointer-events: none;
+}
+
+/* Content Wrapper */
+.content {
+    position: relative;
+    z-index: 1;
+    padding: 2px;
+    /* Small padding for the outer rim */
+}
+
+/* Header Section */
+.header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+}
+
+.machineTitle {
+    font-size: 18px;
+    font-weight: 700;
+    color: #111827;
+    /* Darkest grey */
+    letter-spacing: 0.5px;
+}
+
+.machineId {
+    display: block;
+    font-size: 10px;
+    color: #6B7280;
+    /* Medium grey */
+    font-family: monospace;
+    margin-top: 2px;
+}
+
+/* Data Row (The "info" from the SVG) */
+.dataRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px 16px 20px;
+    gap: 12px;
+}
+
+.dataItem {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.dataLabel {
+    font-size: 10px;
+    color: #6B7280;
+    /* Light blue-grey from SVG text paths */
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.dataValueContainer {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.dataDot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+/* Specific colors from SVG */
+.dotGreen {
+    background-color: #059669;
+    box-shadow: 0 0 8px rgba(5, 150, 105, 0.3);
+}
+
+.dotPurple {
+    background-color: #7C3AED;
+    box-shadow: 0 0 8px rgba(124, 58, 237, 0.3);
+}
+
+.dotMagenta {
+    background-color: #C026D3;
+    box-shadow: 0 0 8px rgba(192, 38, 211, 0.3);
+}
+
+.dotBlue {
+    background-color: #0284C7;
+    box-shadow: 0 0 8px rgba(2, 132, 199, 0.3);
+}
+
+.dataValue {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1F2937;
+}
+
+/* Anomaly Alert Box */
+.anomalyContainer {
+    background: #FEF2F2;
+    border: 1px solid #FECACA;
+    border-radius: 12px;
+    margin: 0 20px 16px 20px;
+    padding: 12px;
+}
+
+.anomalyHeader {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.anomalyTitle {
+    color: #B91C1C;
+    font-weight: 700;
+    font-size: 12px;
+    text-transform: uppercase;
+}
+
+.anomalyText {
+    font-size: 11px;
+    color: #7F1D1D;
+    line-height: 1.4;
+}
+
+/* Action Buttons Row */
+.actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding: 0 20px 20px 20px;
+}
+
+.actionBtn {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px;
+    border-radius: 14px;
+    background: #FFFFFF;
+    border: 1px solid #D1D5DB;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.actionBtn:hover {
+    background: #F9FAFB;
+    border-color: #9CA3AF;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.actionIconWrapper {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Updated Button Colors from boton.svg */
+/* Create Order -> Green #60BC8E */
+.btnCreate .actionIconWrapper {
+    background: #D1FAE5;
+    color: #059669;
+}
+
+.btnCreate:hover .actionIconWrapper {
+    background: #A7F3D0;
+}
+
+.btnCreate .btnLabel {
+    color: #059669;
+    /* Colored text for emphasis? Or keep generic? User said colors match SVG */
+}
+
+/* Expand View -> Purple #5F56B0 */
+.btnExpand .actionIconWrapper {
+    background: #EDE9FE;
+    color: #7C3AED;
+}
+
+.btnExpand:hover .actionIconWrapper {
+    background: #DDD6FE;
+}
+
+.btnExpand .btnLabel {
+    color: #7C3AED;
+}
+
+.btnLabel {
+    font-size: 11px;
+    font-weight: 600;
+    /* Default color overridden by specific classes above */
+    transition: color 0.2s;
+}
+
+/* Close Button */
+.closeBtn {
+    background: transparent;
+    border: none;
+    color: #9CA3AF;
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.2s;
+}
+
+.closeBtn:hover {
+    color: #4B5563;
+}
+
+/* Pointer Triangle */
+.pointer {
+    position: absolute;
+    bottom: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-top: 8px solid #E9ECF3;
+    /* Match new background */
+}

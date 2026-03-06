@@ -1,0 +1,137 @@
+/* ─── Expand View Styles ────────────────────────────────────────────── */
+
+/* ── Card ── */
+.card {
+    border-radius: var(--tp-radius-pill);
+    background: var(--tp-bg-card);
+    padding: 10px;
+    border: 2px solid #98A6D4;
+    /* Matching NxpJT stroke */
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.timelineCard {
+    border-radius: var(--tp-radius-pill);
+    background: var(--tp-bg-card);
+    border: 2px solid #98A6D4;
+    overflow-y: auto;
+    overflow-x: hidden;
+    position: relative;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ─── Asset Tree ─── */
+.treeHeader {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--tp-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 12px;
+    border-bottom: 1px solid var(--tp-stroke);
+}
+
+.treeItem {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    color: var(--tp-text-muted);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-radius: 4px;
+    margin: 0 4px;
+}
+
+.treeItem:hover {
+    background: rgba(0, 0, 0, 0.04);
+    color: var(--tp-text-heading);
+}
+
+.treeSubItem {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    color: var(--tp-text-muted);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-radius: 4px;
+    margin: 0 4px;
+}
+
+.treeSubItem:hover {
+    background: rgba(0, 0, 0, 0.04);
+    color: var(--tp-text-heading);
+}
+
+.treeSubItemActive {
+    background: var(--tp-bg-pill);
+    /* or active tint */
+    color: var(--tp-accent-blue);
+    font-weight: 600;
+}
+
+/* ─── Machine Summary ─── */
+.summaryCard{
+    display:flex;
+    flex-direction: column;
+    gap:2px;
+    width:100%;
+    overflow:hidden;
+}
+.summaryBar {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 0 20px;
+    overflow-x: auto;
+    background: transparent;
+}
+
+.summaryStat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.summaryLabel {
+    font-size: 10px;
+    color: var(--tp-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+}
+
+.summaryValue {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--tp-text-heading);
+}
+
+.summaryBtn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 16px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    background: #fff;
+    border: 1px solid var(--tp-stroke);
+    color: var(--tp-text-heading);
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.summaryBtn:hover {
+    background: var(--tp-bg-pill);
+    border-color: #98A6D4;
+}
