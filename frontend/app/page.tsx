@@ -1,6 +1,6 @@
 'use client'
 
-
+import { AuthScreen } from '@/components/auth/AuthScreen'
 import { DigitalTwinNavigator } from '@/components/digital-twin/DigitalTwinNavigator'
 import { MiniDigitalTwin } from '@/components/digital-twin/MiniDigitalTwin'
 import { CAMERA_PRESETS } from '@/components/digital-twin/camera-presets'
@@ -9,6 +9,7 @@ import { OverviewExpand } from '@/components/overview/OverviewExpand'
 import { RightPanel } from '@/components/overview/RightPanel'
 import { UpdatesView } from '@/components/updates/UpdatesView'
 import { useOpshubStore } from '@/lib/store/opshub-store'
+import { useAuthStore } from '@/lib/store/auth-store'
 import { useTfoStore } from '@/lib/store/tfo-store'
 import type { TfoModule } from '@/lib/types/tfo'
 import {
@@ -56,6 +57,24 @@ function ModuleLoader({ label }: { label: string }) {
 // ─── MAIN PAGE ─────────────────────────────────────────────────────────────
 
 export default function TFODashboard() {
+    const { token, _hydrated } = useAuthStore()
+
+    // Wait for Zustand persist to hydrate from localStorage before deciding
+    // which screen to show — prevents a flash of the login screen on reload.
+    if (!_hydrated) {
+        return (
+            <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
+                <div className="h-8 w-8 rounded-full border-2 border-zinc-700 border-t-cyan-500 animate-spin" />
+            </div>
+        )
+    }
+
+    if (!token) return <AuthScreen />
+
+    return <Dashboard />
+}
+
+function Dashboard() {
     const { activeModule, setActiveModule, facilityMetrics, activeAlerts, recentWorkflows, locations, activeLocationId, setActiveLocation } =
         useTfoStore()
 

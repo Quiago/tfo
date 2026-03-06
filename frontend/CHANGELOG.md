@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Real Connector Data & Timeline Connector Management
+- **`ConnectorModal`** (`components/timeline/ConnectorModal.tsx`): 4-step modal (form → connecting → connected → error) to register and discover OPC-UA, MQTT, or REST connectors. Shows discovered node count and first 4 nodes preview. Handles 409 (already exists) gracefully.
+- **`useConnectorTimeline`** hook (`lib/hooks/useConnectorTimeline.ts`): State machine (`idle | discovering | connected | not_found | error`) wrapping `useMultiLayerData`. Discovers nodes on mount, reads baseline values to seed historical data, polls live values every 2s. Returns empty arrays when not connected — no mock data ever displayed.
+- **`SensorSeed` / `initialSeed`**: Extension to `useMultiLayerData` allowing real connector baseline values to seed the initial PRNG walk instead of hardcoded defaults.
+- **`ConnectorOverlay`**: Absolute-positioned overlay on timeline showing spinner (discovering) or error icon (not_found/error). Hidden when `idle` or `connected`.
+- **Empty state UI**: When no connector is active, timeline shows Plug2 icon + description + "Add Connector" CTA instead of charts.
+- **"Add Connector" button** in timeline header: opens `ConnectorModal`; shows active connector ID when connected.
+- **Connector types** (`lib/types/connector.ts`): `ConnectorType`, `ConnectorCreate`, `ConnectorResponse`, `DiscoveryResponse`, `DataResponse`.
+- **Connector service** (`lib/services/connector.service.ts`): `createConnector`, `listConnectors`, `discoverConnector`, `readConnectorNode`.
+
+### Fixed
+
+- **404 on `/connectors/ua-1/discover`**: Removed hardcoded `connectorId="ua-1"` from `OverviewExpand.tsx`. Connectors are now registered dynamically via the modal.
+- **401 Unauthorized handling**: `apiFetch` in `backend.ts` now clears localStorage and reloads the page on 401 responses, forcing re-login when JWT expires.
+- **`RuntimeError: asyncio.run() cannot be called from a running event loop`**: All `ConnectorBackend` abstract methods and concrete implementations changed from `def` + `asyncio.run()` to `async def` + direct `await`. Service functions updated to `async def` accordingly.
+- **OPC-UA discovery returning 0 nodes**: Restored original flat `_browse_recursive` approach (iterates all children of `client.nodes.objects`, skips `ns=0`, collects Variable nodes into flat list, recurses only into Objects). Replaces Object-centric `_browse_for_assets` that was too strict for most server hierarchies.
+- **Null reference errors with empty data**: All `LayerHeader` stats props wrapped with null guards since data arrays are empty when no connector is connected.
+
+### Added
+
 #### Fithub Component (`components/fithub/`)
 - New **Fithub** component: GitHub-inspired cross-facility learning and anomaly detection hub
 - 3-column layout: Factory repos sidebar (left), Feed (center), Changelog (right)

@@ -1,5 +1,6 @@
 'use client'
 
+import { useAuthStore } from '@/lib/store/auth-store'
 import { type FacilityLocation } from '@/lib/store/tfo-store'
 import type { TfoModule } from '@/lib/types/tfo'
 import nav from '@/styles/navbar/navbar.module.css'
@@ -8,6 +9,7 @@ import {
     ChevronDown,
     LayoutDashboard,
     LayoutGrid,
+    LogOut,
     MapPin,
     RefreshCw,
     Search,
@@ -62,6 +64,8 @@ export function Navbar({
     onLocationChange: (id: string) => void
 }) {
     const [dropdownOpen, setDropdownOpen] = useState(false)
+    const [userMenuOpen, setUserMenuOpen] = useState(false)
+    const { email, clear } = useAuthStore()
 
     return (
         <nav className={nav.navbar}>
@@ -142,10 +146,36 @@ export function Navbar({
             </div>
 
             {/* User Profile */}
-            <div className={nav.userSection}>
-                <UserAvatar className={nav.userAvatar} />
-                <span className={nav.userName}>User</span>
-                <ChevronDown size={14} className={nav.userChevron} />
+            <div className="relative">
+                <button
+                    onClick={() => setUserMenuOpen(!userMenuOpen)}
+                    className={nav.userSection}
+                >
+                    <UserAvatar className={nav.userAvatar} />
+                    <span className={nav.userName}>{email?.split('@')[0] ?? 'User'}</span>
+                    <ChevronDown size={14} className={`${nav.userChevron} transition-transform ${userMenuOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {userMenuOpen && (
+                    <>
+                        <div className="fixed inset-0 z-40" onClick={() => setUserMenuOpen(false)} />
+                        <div className="absolute top-full right-0 mt-2 w-48 rounded-xl border border-zinc-200 bg-white shadow-xl overflow-hidden z-50 py-1">
+                            {email && (
+                                <div className="px-4 py-2.5 border-b border-zinc-100">
+                                    <p className="text-xs text-zinc-400">Signed in as</p>
+                                    <p className="text-sm text-zinc-700 font-medium truncate">{email}</p>
+                                </div>
+                            )}
+                            <button
+                                onClick={() => { clear(); setUserMenuOpen(false); }}
+                                className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2.5 transition-colors"
+                            >
+                                <LogOut size={14} />
+                                Sign out
+                            </button>
+                        </div>
+                    </>
+                )}
             </div>
         </nav>
     )

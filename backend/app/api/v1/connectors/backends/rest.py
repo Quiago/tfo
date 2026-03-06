@@ -35,47 +35,33 @@ class RESTConnector(ConnectorBackend):
         base = self.connector.endpoint.rstrip("/")
         return f"{base}/{path.lstrip('/')}"
 
-    def read(self, path: str, **kwargs) -> Any:
+    async def read(self, path: str, **kwargs) -> Any:
         url = self._url(path)
         logger.debug("REST read", extra={"connector_id": self.connector.id, "url": url})
+        async with httpx.AsyncClient(verify=self._verify_ssl) as client:
+            response = await client.get(url, headers=self._headers, params=kwargs, timeout=self._timeout)
+            response.raise_for_status()
+            try:
+                return response.json()
+            except Exception:
+                return response.text
 
-        async def _get():
-            async with httpx.AsyncClient(verify=self._verify_ssl) as client:
-                response = await client.get(url, headers=self._headers, params=kwargs, timeout=self._timeout)
-                response.raise_for_status()
-                try:
-                    return response.json()
-                except Exception:
-                    return response.text
-
-        import asyncio
-        return asyncio.run(_get())
-
-    def write(self, path: str, value: Any, **kwargs) -> None:
+    async def write(self, path: str, value: Any, **kwargs) -> None:
         url = self._url(path)
         body = {"value": value}
         logger.debug("REST write", extra={"connector_id": self.connector.id, "url": url})
+        async with httpx.AsyncClient(verify=self._verify_ssl) as client:
+            response = await client.request(
+                self._write_method, url, json=body, headers=self._headers, timeout=self._timeout,
+            )
+            response.raise_for_status()
 
-        async def _write():
+    async def health(self) -> bool:
+        try:
             async with httpx.AsyncClient(verify=self._verify_ssl) as client:
-                response = await client.request(
-                    self._write_method, url, json=body, headers=self._headers, timeout=self._timeout,
+                response = await client.get(
+                    self.connector.endpoint, headers=self._headers, timeout=5,
                 )
-                response.raise_for_status()
-
-        import asyncio
-        asyncio.run(_write())
-
-    def health(self) -> bool:
-        async def _health():
-            try:
-                async with httpx.AsyncClient(verify=self._verify_ssl) as client:
-                    response = await client.get(
-                        self.connector.endpoint, headers=self._headers, timeout=5,
-                    )
-                    return response.status_code < 500
-            except Exception:
-                return False
-
-        import asyncio
-        return asyncio.run(_health())
+                return response.status_code < 500
+        except Exception:
+            return False

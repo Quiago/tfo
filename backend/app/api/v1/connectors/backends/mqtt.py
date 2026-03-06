@@ -27,7 +27,7 @@ class MQTTConnector(ConnectorBackend):
     def __init__(self, connector: Connector):
         super().__init__(connector)
 
-    def read(self, path: str, **kwargs) -> Any:
+    async def read(self, path: str, **kwargs) -> Any:
         """
         path: topic MQTT, ej: "factory/line-1/temperature"
         Suscribe al topic, espera el primer mensaje y devuelve el payload.
@@ -48,7 +48,7 @@ class MQTTConnector(ConnectorBackend):
         """
         raise NotImplementedError("MQTT backend not yet implemented. Install aiomqtt: uv add aiomqtt")
 
-    def write(self, path: str, value: Any, **kwargs) -> None:
+    async def write(self, path: str, value: Any, **kwargs) -> None:
         """
         path: topic MQTT
         value: payload a publicar
@@ -63,7 +63,7 @@ class MQTTConnector(ConnectorBackend):
         """
         raise NotImplementedError("MQTT backend not yet implemented. Install aiomqtt: uv add aiomqtt")
 
-    def health(self) -> bool:
+    async def health(self) -> bool:
         """
         Implementación de referencia:
 

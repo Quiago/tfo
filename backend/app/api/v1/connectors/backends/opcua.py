@@ -80,6 +80,43 @@ from app.api.v1.connectors.models import Connector
 logger = logging.getLogger(__name__)
 
 NodeId = str
+
+
+def _to_json_safe(value: Any) -> Any:
+    """
+    Convierte cualquier valor OPC-UA a un tipo JSON-serializable.
+
+    OPC-UA puede devolver bytes (ByteString, Guid), ExtensionObjects, enums,
+    NodeIds, etc. que Pydantic no puede serializar directamente.
+    """
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        # Strings can have embedded nulls or invalid UTF-8 from some servers
+        try:
+            value.encode('utf-8')
+            return value
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            return value.encode('utf-8', errors='replace').decode('utf-8')
+    if isinstance(value, (bytes, bytearray)):
+        return value.hex()
+    if isinstance(value, (list, tuple)):
+        return [_to_json_safe(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _to_json_safe(v) for k, v in value.items()}
+    # ExtensionObjects, NodeIds, enums, datetime, etc.
+    try:
+        import datetime
+        if isinstance(value, datetime.datetime):
+            return value.isoformat()
+    except Exception:
+        pass
+    try:
+        return str(value)
+    except Exception:
+        return None
+
+
 _FOLDER_TYPE_ID = 61
 _DI_NAMESPACE_URI = "http://opcfoundation.org/UA/DI/"
 _DI_DEVICE_SET_ID = 5001
@@ -104,7 +141,7 @@ class OPCUAConnector(ConnectorBackend):
         super().__init__(connector)
         self._cfg = connector.backend_config
 
-    def read(self, path: str, **kwargs) -> Any:
+    async def read(self, path: str, **kwargs) -> Any:
         """
         Lee el valor de un nodo OPC-UA.
 
@@ -117,22 +154,19 @@ class OPCUAConnector(ConnectorBackend):
           Ir a Ignition Designer → Tag Browser → clic derecho en tag → "Edit Tag"
           El OPC Item Path es el NodeId que va aquí.
         """
-        async def _read():
-            async with _make_client(self.connector.endpoint, self._cfg) as client:
-                node = client.get_node(path)
-                value = await node.read_value()
-                dv: DataValue = await node.read_data_value()
-                return {
-                    "node_id": path,
-                    "value": value,
-                    "status_code": str(dv.StatusCode),
-                    "source_timestamp": dv.SourceTimestamp.isoformat() if dv.SourceTimestamp else None,
-                }
-
         logger.debug("OPC-UA read", extra={"connector_id": self.connector.id, "node_id": path})
-        return asyncio.run(_read())
+        async with _make_client(self.connector.endpoint, self._cfg) as client:
+            node = client.get_node(path)
+            value = await node.read_value()
+            dv: DataValue = await node.read_data_value()
+            return {
+                "node_id": path,
+                "value": _to_json_safe(value),
+                "status_code": str(dv.StatusCode),
+                "source_timestamp": dv.SourceTimestamp.isoformat() if dv.SourceTimestamp else None,
+            }
 
-    def write(self, path: str, value: Any, **kwargs) -> None:
+    async def write(self, path: str, value: Any, **kwargs) -> None:
         """
         Escribe un valor en un nodo OPC-UA.
 
@@ -140,237 +174,146 @@ class OPCUAConnector(ConnectorBackend):
         value: valor a escribir; asyncua infiere el tipo automáticamente.
                Para forzar el tipo: pasar params={"variant_type": "Float"}
         """
-        async def _write():
-            async with _make_client(self.connector.endpoint, self._cfg) as client:
-                node = client.get_node(path)
-                variant_type_name = kwargs.get("variant_type", 0)
-                if variant_type_name:
-                    VariantType = ua.VariantType
-                    vt = getattr(VariantType, variant_type_name)
-                    await node.write_value(DataValue(Variant(value, vt)))
-                else:
-                    await node.write_value(value)
-
         logger.debug("OPC-UA write", extra={"connector_id": self.connector.id, "node_id": path, "value": value})
-        asyncio.run(_write())
+        async with _make_client(self.connector.endpoint, self._cfg) as client:
+            node = client.get_node(path)
+            variant_type_name = kwargs.get("variant_type", 0)
+            if variant_type_name:
+                VariantType = ua.VariantType
+                vt = getattr(VariantType, variant_type_name)
+                await node.write_value(DataValue(Variant(value, vt)))
+            else:
+                await node.write_value(value)
 
-    def discover(self) -> DiscoveryResult:
+    async def discover(self) -> DiscoveryResult:
         """
-        Discovery semántico: navega el address space y devuelve AssetDiscovery
-        (Objects con sus Variables agrupadas), no una lista plana de nodos.
+        Navega el árbol de nodos OPC-UA recursivamente y devuelve todos los
+        nodos de tipo Variable (los que tienen valores legibles) como lista plana.
 
-        Entry points:
-          1. Objects (ns=0;i=85) — raíz estándar para todos los servidores
-          2. DeviceSet (DI companion spec) — si el servidor tiene DI cargado
+        Ignora namespace 0 (infraestructura interna del servidor OPC-UA).
+        Variables no se recursan — sus hijos son metadatos, no datos de proceso.
 
-        Los límites son configurables en backend_config para adaptarse a
-        cualquier servidor (desde demoservers con 200 nodos hasta Ignition
-        enterprise con 50,000+ tags):
-          discovery_max_nodes  — máximo de assets (no variables individuales)
-          discovery_timeout_s  — timeout total, devuelve parciales si se alcanza
-          discovery_max_depth  — profundidad máxima de recursión
+        Configurable via backend_config:
+          discovery_timeout_s  — timeout global en segundos (default: 60)
+          discovery_max_nodes  — máximo de nodos Variable a recolectar (default: 500)
+          discovery_max_depth  — profundidad máxima de recursión (default: 8)
         """
-        max_assets = self._cfg.get("discovery_max_nodes", 5000)
-        timeout_s = self._cfg.get("discovery_timeout_s", 120)
+        timeout_s = self._cfg.get("discovery_timeout_s", 60)
+        max_nodes = self._cfg.get("discovery_max_nodes", 500)
         max_depth = self._cfg.get("discovery_max_depth", 8)
 
-        async def _discover():
-            assets: list[AssetDiscovery] = []
-            try:
-                async with asyncio.timeout(timeout_s):
-                    async with _make_client(self.connector.endpoint, self._cfg) as client:
-                        objects = client.get_node("ns=0;i=85")
-                        await self._browse_for_assets(objects, [], assets, 0, max_depth, max_assets)
-                        di_nodes = await self._find_di_entry_points(client)
-                        for di_node, di_label in di_nodes:
-                            await self._browse_for_assets(di_node, [di_label], assets, 0, max_depth, max_assets)
-            except TimeoutError:
-                logger.warning(
-                    "OPC-UA discovery timeout — partial results returned. "
-                    "Increase discovery_timeout_s in backend_config if needed",
-                    extra={"connector_id": self.connector.id, "assets_found": len(assets), "timeout_s": timeout_s},
-                )
-            return assets
+        nodes: list[NodeInfo] = []
+        try:
+            async with asyncio.timeout(timeout_s):
+                async with _make_client(self.connector.endpoint, self._cfg) as client:
+                    await self._browse_recursive(
+                        node=client.nodes.objects,
+                        path=[],
+                        result=nodes,
+                        depth=0,
+                        max_depth=max_depth,
+                        max_nodes=max_nodes,
+                    )
+        except TimeoutError:
+            logger.warning(
+                "OPC-UA discovery timeout — returning partial results",
+                extra={"connector_id": self.connector.id, "nodes_found": len(nodes)},
+            )
 
-        assets = asyncio.run(_discover())
-        all_nodes = [var for asset in assets for var in asset.variables]
         logger.info(
             "OPC-UA discovery complete",
-            extra={"connector_id": self.connector.id, "assets": len(assets), "variables": len(all_nodes)},
+            extra={"connector_id": self.connector.id, "node_count": len(nodes)},
         )
         return DiscoveryResult(
             connector_id=self.connector.id,
-            node_count=len(all_nodes),
-            nodes=all_nodes,
-            assets=assets,
+            node_count=len(nodes),
+            nodes=nodes,
         )
 
-    async def _browse_for_assets(
+    async def _browse_recursive(
         self,
         node: Node,
         path: list[str],
-        assets: list[AssetDiscovery],
+        result: list[NodeInfo],
         depth: int,
-        max_depth: int,
-        max_assets: int,
+        max_depth: int = 8,
+        max_nodes: int = 500,
     ) -> None:
         """
-        Traversal Object-centric del address space OPC-UA.
+        Traversal recursivo del address space OPC-UA.
 
-        Para cada Object visitado:
-          - Recolecta sus Variables directas → son las propiedades del equipo
-          - Si tiene Variables → crea un AssetDiscovery y lo añade al resultado
-          - Recursa en sus Object hijos (sin importar si tenía Variables o no)
-
-        Variables NO se recursan: sus hijos son Properties del sistema
-        (EngineeringUnits, EURange…), no datos de proceso.
-
-        Un solo `read_attributes([DisplayName, NodeClass])` por nodo reduce
-        los round-trips a la mitad respecto a llamadas individuales,
-        crítico para servidores remotos con alta latencia.
-
-        El límite max_assets detiene el discovery cuando se alcanzan N assets
-        (no N variables individuales), haciendo el límite más predecible.
+        - Skips namespace 0 (nodos internos del servidor).
+        - Variables: lee data_type + writable, añade a result, NO recursa
+          (sus hijos son metadatos EngineeringUnits/EURange, no datos).
+        - Objects: recursa en ellos.
+        - Batch read de DisplayName + NodeClass en un solo request de red.
         """
-        if depth > max_depth or len(assets) >= max_assets:
+        if depth > max_depth or len(result) >= max_nodes:
             return
 
         try:
             children = await node.get_children()
         except Exception:
-            logger.debug(
-                "OPC-UA get_children failed — skipping node",
-                extra={"node": str(node), "depth": depth},
-                exc_info=True,
-            )
             return
-
-        variables: list[NodeInfo] = []
-        sub_objects: list[tuple] = []
 
         for child in children:
+            if len(result) >= max_nodes:
+                return
             try:
-                child_id = child.nodeid.to_string()
-                node_id = str(child_id)
+                node_id = child.nodeid
+                # Ignorar namespace 0 — nodos internos del servidor OPC-UA
+                if node_id.NamespaceIndex == 0:
+                    continue
+
                 attrs = await child.read_attributes([AttributeIds.DisplayName, AttributeIds.NodeClass])
-                name = getattr(attrs[0].Value, "Text", "?") or "?"
-                node_class = attrs[1].Value
+                raw_name = attrs[0].Value.Value if attrs[0].Value else None
+                name = (raw_name.Text if hasattr(raw_name, 'Text') else str(raw_name)) if raw_name else str(node_id)
+                node_class = attrs[1].Value.Value if attrs[1].Value else None
+                current_path = path + [name]
 
                 if node_class == NodeClass.Variable:
-                    data_type, writable = await self._read_variable_details(child)
-                    display_name = name
-                    variables.append(NodeInfo(
-                        node_id=node_id,
-                        display_name=display_name,
-                        path=path + [display_name],
-                        data_type=data_type,
+                    try:
+                        dv: DataValue = await child.read_data_value()
+                        vt = dv.Value.VariantType.name if dv.Value else "Unknown"
+                    except Exception:
+                        vt = "Unknown"
+
+                    try:
+                        access = await child.read_user_access_level()
+                        writable = bool(access & 0x02)
+                    except Exception:
+                        writable = False
+
+                    result.append(NodeInfo(
+                        node_id=child.nodeid.to_string(),
+                        display_name=name,
+                        path=current_path,
+                        data_type=vt,
                         writable=writable,
                     ))
+                    # Variables no se recursan — sus hijos son metadatos del sistema
+
                 elif node_class == NodeClass.Object:
-                    sub_node = child
-                    sub_name = name
-                    sub_objects.append((sub_node, sub_name))
+                    await self._browse_recursive(child, current_path, result, depth + 1, max_depth, max_nodes)
+
             except Exception:
-                logger.debug(
-                    "OPC-UA node skipped",
-                    extra={"node_id": str(child), "display_name": "?", "path": path},
-                )
+                continue
 
-        if variables:
-            asset_name = path[-1] if path else "/"
-            assets.append(AssetDiscovery(
-                node_id=node.nodeid.to_string(),
-                display_name=asset_name,
-                path=path,
-                variables=variables,
-            ))
-            logger.debug(
-                "OPC-UA asset found",
-                extra={"asset_name": asset_name, "vars": len(variables), "path": "/".join(path)},
-            )
-
-        if len(assets) >= max_assets:
-            logger.warning(
-                "OPC-UA discovery asset limit reached. "
-                "Increase discovery_max_nodes in backend_config",
-                extra={"connector_id": self.connector.id, "max_assets": max_assets},
-            )
-            return
-
-        for sub_node, sub_name in sub_objects:
-            await self._browse_for_assets(sub_node, path + [sub_name], assets, depth + 1, max_depth, max_assets)
-
-    async def _read_variable_details(self, node: Node) -> tuple[str, bool]:
-        """
-        Lee data_type y writable de un nodo Variable.
-        Dos calls separados porque no son AttributeIds estándar batcheables juntos.
-        """
-        data_type = "Unknown"
-        writable = False
-        try:
-            dv: DataValue = await node.read_data_value()
-            data_type = dv.Value.VariantType.name if dv.Value else "Unknown"
-        except Exception:
-            logger.debug("OPC-UA read_data_value failed — defaulting to Unknown", exc_info=True)
-        try:
-            access = await node.read_user_access_level()
-            writable = bool(access & 2)
-        except Exception:
-            logger.debug("OPC-UA read_user_access_level failed — defaulting to not writable", exc_info=False)
-        return data_type, writable
-
-    async def _find_di_entry_points(self, client: Client) -> list[tuple]:
-        """
-        Detecta si el servidor tiene el companion spec OPC-UA DI cargado.
-
-        OPC-UA DI (Device Integration, IEC 62541-100) define un nodo DeviceSet
-        (ns=<DI>;i=5001) bajo Objects que contiene dispositivos físicos tipados
-        (DeviceType, SensorType, ActuatorType…). Es muy común en:
-          - Siemens S7-1500, Beckhoff TwinCAT 3, Phoenix Contact PLCnext
-          - Cualquier servidor certificado OPC-UA DI compliant
-
-        El namespace index del companion spec varía por servidor — NUNCA
-        hardcodearlo. Siempre resolverlo desde el NamespaceArray (ns=0;i=2255).
-
-        Devuelve lista de (node, display_label) para navegar como entry points.
-        Lista vacía si el servidor no tiene DI o si DeviceSet no es accesible.
-        """
-        try:
-            ns_array = await client.get_namespace_array()
-            di_idx = ns_array.index(_DI_NAMESPACE_URI)
-            device_set = client.get_node(ua.NodeId(_DI_DEVICE_SET_ID, di_idx))
-            await device_set.read_node_class()
-            logger.info(
-                "OPC-UA DI companion spec detected — adding DeviceSet entry point",
-                extra={"connector_id": self.connector.id, "di_ns_idx": di_idx},
-            )
-            return [(device_set, "DeviceSet")]
-        except Exception:
-            logger.debug(
-                "OPC-UA DI companion spec not available or not accessible",
-                extra={"connector_id": self.connector.id},
-                exc_info=True,
-            )
-            return []
-
-    def health(self) -> bool:
+    async def health(self) -> bool:
         """
         Verifica conectividad con el servidor OPC-UA.
         Lee el nodo estándar ServerStatus (ns=0;i=2256), presente en cualquier
         servidor OPC-UA compatible con la especificación.
         """
-        async def _health():
-            try:
-                async with _make_client(self.connector.endpoint, self._cfg) as client:
-                    node = client.get_node("ns=0;i=2256")
-                    await node.read_value()
-                    return True
-            except Exception as exc:
-                logger.warning(
-                    "OPC-UA health check failed",
-                    extra={"connector_id": self.connector.id, "error": str(exc)},
-                    exc_info=True,
-                )
-                return False
-
-        return asyncio.run(_health())
+        try:
+            async with _make_client(self.connector.endpoint, self._cfg) as client:
+                node = client.get_node("ns=0;i=2256")
+                await node.read_value()
+                return True
+        except Exception as exc:
+            logger.warning(
+                "OPC-UA health check failed",
+                extra={"connector_id": self.connector.id, "error": str(exc)},
+                exc_info=True,
+            )
+            return False

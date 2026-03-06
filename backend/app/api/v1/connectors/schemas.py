@@ -92,7 +92,7 @@ class DiscoveryResponse(BaseModel):
     node_count: int
     cached: bool = False
     nodes: list[NodeInfoResponse]
-    assets: list[AssetDiscoveryResponse]
+    assets: list[AssetDiscoveryResponse] = []
 
 
 class ConnectorHealthResponse(BaseModel):

@@ -1,6 +1,7 @@
 'use client';
 
-import { useMultiLayerData } from '@/lib/hooks/useMultiLayerData';
+import { useConnectorTimeline, type ConnectorStatus } from '@/lib/hooks/useConnectorTimeline';
+import { ConnectorModal } from './ConnectorModal';
 import type {
     ActionEvent,
     EnergyReading,
@@ -18,6 +19,7 @@ import {
     Maximize2,
     Minimize2,
     Package,
+    Plug2,
     User,
     Zap,
 } from 'lucide-react';
@@ -1098,13 +1100,79 @@ function SensorFilterBar({
     );
 }
 
+// ─── CONNECTOR OVERLAY ───────────────────────────────────────────────────────
+function ConnectorOverlay({
+    status,
+    connectorId,
+    onRetry,
+    onChangeConnector,
+}: {
+    status: ConnectorStatus;
+    connectorId: string;
+    onRetry: () => void;
+    onChangeConnector: () => void;
+}) {
+    const config: Record<Exclude<ConnectorStatus, 'idle' | 'connected'>, { title: string; sub: string; isError: boolean }> = {
+        discovering: {
+            title: 'Connecting to data source',
+            sub: `Discovering nodes on "${connectorId}"…`,
+            isError: false,
+        },
+        not_found: {
+            title: 'Connector not found',
+            sub: `No connector with ID "${connectorId}". Register it first.`,
+            isError: true,
+        },
+        error: {
+            title: 'Stream interrupted',
+            sub: 'Lost connection to the data source. Check that the server is running.',
+            isError: true,
+        },
+    };
+
+    if (status === 'idle' || status === 'connected') return null;
+    const { title, sub, isError } = config[status];
+
+    return (
+        <div className="absolute inset-0 z-50 bg-[#171921]/95 backdrop-blur-sm flex flex-col items-center justify-center gap-4">
+            {isError ? (
+                <AlertTriangle size={32} className="text-amber-400" />
+            ) : (
+                <span className="h-8 w-8 rounded-full border-2 border-zinc-600 border-t-cyan-400 animate-spin" />
+            )}
+            <div className="text-center">
+                <p className="text-sm font-semibold text-white">{title}</p>
+                <p className="text-xs text-zinc-400 mt-1 max-w-xs">{sub}</p>
+            </div>
+            {isError && (
+                <div className="flex gap-2">
+                    <button
+                        onClick={onRetry}
+                        className="px-4 py-2 text-xs font-semibold bg-cyan-500 hover:bg-cyan-400 text-zinc-950 rounded-lg transition-colors"
+                    >
+                        Reconnect
+                    </button>
+                    <button
+                        onClick={onChangeConnector}
+                        className="px-4 py-2 text-xs font-semibold bg-zinc-700 hover:bg-zinc-600 text-white rounded-lg transition-colors"
+                    >
+                        Change Connector
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
+
 // ─── MAIN COMPONENT ─────────────────────────────────────────────────────────
 interface MultiLayerTimelineProps {
     autoTriggerAnomaly?: boolean;
     onAnomalyTriggered?: () => void;
+    /** If provided, the sensor layer streams real data from this connector instead of mock. */
+    connectorId?: string;
 }
 
-export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered }: MultiLayerTimelineProps) {
+export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, connectorId: connectorIdProp }: MultiLayerTimelineProps) {
     const [granularity, setGranularity] = useState<TimeGranularity>('Day');
     const [expandedLayer, setExpandedLayer] = useState<string | null>(null);
     const [visibleSensors, setVisibleSensors] = useState<Record<string, boolean>>({
@@ -1114,6 +1182,10 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered }: M
         humidity: false,
         pressure: false,
     });
+
+    // Active connector — can be set via prop (initial) or by the user through the modal
+    const [activeConnectorId, setActiveConnectorId] = useState<string | undefined>(connectorIdProp);
+    const [modalOpen, setModalOpen] = useState(false);
 
     // Effect to handle auto-trigger from parent
     useEffect(() => {
@@ -1142,7 +1214,8 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered }: M
         forecastBoundaryTimestamp,
         isStreaming,
         triggerAnomaly,
-    } = useMultiLayerData(granularity);
+        connectorStatus,
+    } = useConnectorTimeline(activeConnectorId, granularity);
 
     const lastTimestamp = useMemo(
         () => (timestamps.length > 0 ? timestamps[timestamps.length - 1] : null),
@@ -1221,7 +1294,31 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered }: M
     );
 
     return (
-        <div className="w-full min-h-full bg-[#171921] text-white flex flex-col">
+        <div className="w-full min-h-full bg-[#171921] text-white flex flex-col relative">
+            {/* Connector setup modal */}
+            {modalOpen && (
+                <ConnectorModal
+                    onClose={() => setModalOpen(false)}
+                    onConnected={(id) => setActiveConnectorId(id)}
+                />
+            )}
+            {/* Connector loading / error overlay */}
+            {activeConnectorId && (
+                <ConnectorOverlay
+                    status={connectorStatus}
+                    connectorId={activeConnectorId}
+                    onRetry={() => {
+                        // Re-trigger discovery by resetting the connector id
+                        const id = activeConnectorId;
+                        setActiveConnectorId(undefined);
+                        setTimeout(() => setActiveConnectorId(id), 50);
+                    }}
+                    onChangeConnector={() => {
+                        setActiveConnectorId(undefined);
+                        setModalOpen(true);
+                    }}
+                />
+            )}
             {/* Header */}
             <div className="border-b border-[#98A6D4]/30 px-6 py-4">
                 <div className="flex items-center justify-between">
@@ -1243,7 +1340,11 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered }: M
                             <LiveIndicator isStreaming={isStreaming} />
                         </h1>
                         <p className="text-xs text-[#98A6D4] mt-1 uppercase tracking-wide">
-                            Zoom: {granularity} · {pointCount} data points · syncId: tripolar-timeline
+                            {activeConnectorId && connectorStatus === 'connected'
+                                ? `Live · ${activeConnectorId} · ${pointCount} data points`
+                                : activeConnectorId
+                                    ? `${connectorStatus}…`
+                                    : 'No data source connected'}
                         </p>
                     </div>
 
@@ -1267,6 +1368,18 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered }: M
                             ))}
                         </div>
 
+                        {/* Add / swap connector */}
+                        <button
+                            onClick={() => setModalOpen(true)}
+                            className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded border transition-all ${activeConnectorId
+                                ? 'border-cyan-500 text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20'
+                                : 'border-zinc-600 text-zinc-400 hover:border-zinc-400 hover:text-zinc-200'
+                                }`}
+                        >
+                            <Plug2 size={13} />
+                            {activeConnectorId ? activeConnectorId : 'Add Connector'}
+                        </button>
+
                         {/* Demo: Trigger anomaly sequence */}
                         <button
                             onClick={triggerAnomaly}
@@ -1278,8 +1391,30 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered }: M
                 </div>
             </div>
 
+            {/* No connector empty state */}
+            {!activeConnectorId && (
+                <div className="flex-1 flex flex-col items-center justify-center gap-5 py-20">
+                    <div className="h-14 w-14 rounded-2xl bg-zinc-800 flex items-center justify-center">
+                        <Plug2 size={24} className="text-zinc-600" />
+                    </div>
+                    <div className="text-center">
+                        <p className="text-sm font-semibold text-zinc-300">No data source connected</p>
+                        <p className="text-xs text-zinc-500 mt-1.5 max-w-xs">
+                            Connect an OPC-UA, MQTT or REST connector to start streaming live sensor data.
+                        </p>
+                    </div>
+                    <button
+                        onClick={() => setModalOpen(true)}
+                        className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold bg-cyan-500 hover:bg-cyan-400 text-zinc-950 rounded-lg transition-colors"
+                    >
+                        <Plug2 size={14} />
+                        Add Connector
+                    </button>
+                </div>
+            )}
+
             {/* Layers */}
-            <div className="divide-y divide-[#98A6D4]/30">
+            <div className={`divide-y divide-[#98A6D4]/30 ${!activeConnectorId ? 'hidden' : ''}`}>
                 {/* Product Layer */}
                 <div
                     className={`transition-all duration-300 ${expandedLayer && expandedLayer !== 'product'
@@ -1291,7 +1426,7 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered }: M
                         config={layers[0]}
                         expanded={expandedLayer === 'product'}
                         onToggleExpand={() => handleToggleExpand('product')}
-                        stats={
+                        stats={latestProduct && (
                             <div className="flex items-center gap-4 text-xs">
                                 <span className="text-violet-600 font-mono">
                                     {formatNumber(latestProduct.output)} units/min
@@ -1305,7 +1440,7 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered }: M
                                     {latestProduct.uptime.toFixed(1)}% uptime
                                 </span>
                             </div>
-                        }
+                        )}
                     />
                     {(!expandedLayer || expandedLayer === 'product') && (
                         <div className="px-2">
@@ -1330,7 +1465,7 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered }: M
                         config={layers[1]}
                         expanded={expandedLayer === 'sensors'}
                         onToggleExpand={() => handleToggleExpand('sensors')}
-                        stats={
+                        stats={latestSensor && (
                             <div className="flex items-center gap-4 text-xs">
                                 <span className="text-emerald-600 font-mono">
                                     {latestSensor.temperature}°C
@@ -1350,7 +1485,7 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered }: M
                                     </span>
                                 )}
                             </div>
-                        }
+                        )}
                     />
                     {(!expandedLayer || expandedLayer === 'sensors') && (
                         <>
@@ -1383,7 +1518,7 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered }: M
                         config={layers[2]}
                         expanded={expandedLayer === 'energy'}
                         onToggleExpand={() => handleToggleExpand('energy')}
-                        stats={
+                        stats={latestEnergy && (
                             <div className="flex items-center gap-4 text-xs">
                                 <span className="text-amber-600 font-mono">
                                     {latestEnergy.powerDraw} kW
@@ -1395,7 +1530,7 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered }: M
                                     <Zap size={12} /> {latestEnergy.costPerHour.toFixed(2)} AED/h
                                 </span>
                             </div>
-                        }
+                        )}
                     />
                     {(!expandedLayer || expandedLayer === 'energy') && (
                         <div className="px-2">

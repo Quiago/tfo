@@ -5,7 +5,21 @@ import type {
     SensorReading,
     TimeGranularity,
 } from '@/lib/types/timeline';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+
+export interface SensorSeed {
+    temperature?: number;
+    vibration?: number;
+    pressure?: number;
+    humidity?: number;
+}
+
+interface UseMultiLayerDataOptions {
+    /** When provided, the live streaming point uses real connector data instead of mock. */
+    sensorOverrideRef?: RefObject<SensorReading | null>;
+    /** When provided, historical data is seeded from real connector baseline values. */
+    initialSeed?: SensorSeed;
+}
 
 // =============================================================================
 // UTILITIES
@@ -207,9 +221,12 @@ function generateSensorData(
     rand: () => number,
     predictionStart: number,
     _granularity: TimeGranularity,
+    seed?: SensorSeed,
 ): SensorReading[] {
-    let temp = 28;
-    let vibration = 3.0;
+    let temp = seed?.temperature ?? 28;
+    let vibration = seed?.vibration ?? 3.0;
+    const baseHumidity = seed?.humidity ?? 52;
+    const basePressure = seed?.pressure ?? 6.5;
     let frameCounter = 0;
 
     // Initial data: completely clean (no anomalies). Anomalies are triggered via Test button.
@@ -254,13 +271,13 @@ function generateSensorData(
 
         // Humidity
         const humidity = round(
-            52 + rand() * 8 + (inPrediction ? (rand() - 0.5) * 5 : 0),
+            baseHumidity + (rand() * 8 - 4) + (inPrediction ? (rand() - 0.5) * 5 : 0),
             1,
         );
 
         // Pressure
         const pressure = round(
-            clamp(6.5 + rand() * 1.2 + (inPrediction ? (rand() - 0.5) * 0.4 : 0), 5.0, 8.0),
+            clamp(basePressure + (rand() * 1.2 - 0.6) + (inPrediction ? (rand() - 0.5) * 0.4 : 0), 5.0, 8.0),
             2,
         );
 
@@ -546,7 +563,13 @@ function generateAnomalySensorPoint(
 // HOOK
 // =============================================================================
 
-export function useMultiLayerData(granularity: TimeGranularity) {
+export function useMultiLayerData(granularity: TimeGranularity, options: UseMultiLayerDataOptions = {}) {
+    const { sensorOverrideRef, initialSeed } = options;
+    // Extract primitives so useCallback deps are stable scalars, not object references
+    const seedTemp = initialSeed?.temperature;
+    const seedVib = initialSeed?.vibration;
+    const seedPressure = initialSeed?.pressure;
+    const seedHumidity = initialSeed?.humidity;
     const pointCount = POINT_COUNTS[granularity];
     // Este es el índice donde termina la historia y empieza la predicción (el "NOW")
     const predictionStart = Math.floor(pointCount * 0.8);
@@ -560,7 +583,11 @@ export function useMultiLayerData(granularity: TimeGranularity) {
     const buildInitialData = useCallback(() => {
         const rand = seededRandom(42);
         const ts = generateTimestamps(granularity, pointCount);
-        const sensors = generateSensorData(ts, rand, predictionStart, granularity);
+        const seed: SensorSeed | undefined =
+            seedTemp !== undefined || seedVib !== undefined || seedPressure !== undefined || seedHumidity !== undefined
+                ? { temperature: seedTemp, vibration: seedVib, pressure: seedPressure, humidity: seedHumidity }
+                : undefined;
+        const sensors = generateSensorData(ts, rand, predictionStart, granularity, seed);
         const products = generateProductData(ts, granularity, rand, predictionStart);
         const energy = generateEnergyData(ts, sensors, rand, predictionStart);
 
@@ -608,7 +635,7 @@ export function useMultiLayerData(granularity: TimeGranularity) {
             actionData: actionEvents,
             productData: products,
         };
-    }, [granularity, pointCount, predictionStart]);
+    }, [granularity, pointCount, predictionStart, seedTemp, seedVib, seedPressure, seedHumidity]);
 
     const [initialData] = useState(() => buildInitialData());
     const [timestamps, setTimestamps] = useState<number[]>(initialData.timestamps);
@@ -693,9 +720,12 @@ export function useMultiLayerData(granularity: TimeGranularity) {
 
             // 1. Punto LIVE (El que insertamos en el medio)
             const lastHistorySensor = prevSensors[predictionStart - 1]; // Usamos el dato anterior al corte para continuidad
+            const realReading = !isAnomalyTick ? sensorOverrideRef?.current : null;
             const newLiveSensor = isAnomalyTick
                 ? generateAnomalySensorPoint(liveTimestamp, lastHistorySensor, frameCounterRef.current)
-                : generateStreamingSensorPoint(liveTimestamp, lastHistorySensor, frameCounterRef.current);
+                : realReading
+                    ? { ...realReading, timestamp: liveTimestamp }
+                    : generateStreamingSensorPoint(liveTimestamp, lastHistorySensor, frameCounterRef.current);
             frameCounterRef.current += 1;
 
             const newLiveEnergy = generateStreamingEnergyPoint(liveTimestamp, newLiveSensor);
