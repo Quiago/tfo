@@ -1,6 +1,6 @@
 'use client';
 
-import { useConnectorTimeline, type ConnectorStatus } from '@/lib/hooks/useConnectorTimeline';
+import { useConnectorTimeline, type ConnectorStatus, type NodeMapping } from '@/lib/hooks/useConnectorTimeline';
 import { ConnectorModal } from './ConnectorModal';
 import type {
     ActionEvent,
@@ -572,8 +572,8 @@ function EnergyLayer({
 
     // Calculate shared Y-axis domain
     const yDomain = useMemo(() => {
-        const allPower = data.map(d => d.powerDraw);
-        const maxVal = Math.max(...allPower);
+        if (data.length === 0) return [0, 200];
+        const maxVal = Math.max(...data.map(d => d.powerDraw));
         return [0, Math.ceil(maxVal * 1.2)];
     }, [data]);
 
@@ -890,9 +890,8 @@ function ProductLayer({
 
     // Calculate shared Y-axis domain from full dataset
     const yDomain = useMemo(() => {
-        const allOutputs = data.map(d => d.output);
-        const allTargets = data.map(d => d.target);
-        const maxVal = Math.max(...allOutputs, ...allTargets);
+        if (data.length === 0) return [0, 1500];
+        const maxVal = Math.max(...data.map(d => d.output), ...data.map(d => d.target));
         return [0, Math.ceil(maxVal * 1.1)];
     }, [data]);
 
@@ -1063,40 +1062,74 @@ function LiveIndicator({ isStreaming }: { isStreaming: boolean }) {
 function SensorFilterBar({
     visibleSensors,
     setVisibleSensors,
+    nodeMappings,
 }: {
     visibleSensors: Record<string, boolean>;
     setVisibleSensors: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+    nodeMappings: NodeMapping[];
 }) {
+    // Build a lookup: field → real display name from connector
+    const realNames: Record<string, string> = {};
+    nodeMappings.forEach((m) => { realNames[m.field] = m.displayName; });
+
+    const SENSOR_DEFS = [
+        { key: 'vibration', label: 'Vibration', color: '#f97316' },
+        { key: 'camera', label: 'Camera', color: '#64748b' },
+        { key: 'temperature', label: 'Temperature', color: '#34d399' },
+        { key: 'humidity', label: 'Humidity', color: '#60a5fa' },
+        { key: 'pressure', label: 'Pressure', color: '#8b5cf6' },
+    ];
+
     return (
-        <div className="flex items-center gap-3 px-4 py-1.5 bg-[#171921] border-b border-[#98A6D4]/30">
-            {[
-                { key: 'vibration', label: 'Vibration', color: '#f97316' },
-                { key: 'camera', label: 'Camera', color: '#64748b' },
-                { key: 'temperature', label: 'Temperature', color: '#34d399' },
-                { key: 'humidity', label: 'Humidity', color: '#60a5fa' },
-                { key: 'pressure', label: 'Pressure', color: '#8b5cf6' },
-            ].map(({ key, label, color }) => (
-                <label
-                    key={key}
-                    className="flex items-center gap-1.5 cursor-pointer text-xs select-none"
-                    onClick={(e) => e.stopPropagation()}
-                >
-                    <input
-                        type="checkbox"
-                        checked={visibleSensors[key]}
-                        onChange={() =>
-                            setVisibleSensors((prev) => ({ ...prev, [key]: !prev[key] }))
-                        }
-                        className="w-3 h-3 rounded accent-current"
-                        style={{ accentColor: color }}
-                    />
-                    <span className="w-2 h-0.5 inline-block" style={{ backgroundColor: color }} />
-                    <span className={visibleSensors[key] ? 'text-white' : 'text-[#98A6D4]'}>
-                        {label}
-                    </span>
-                </label>
-            ))}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-1.5 bg-[#171921] border-b border-[#98A6D4]/30">
+            {SENSOR_DEFS.map(({ key, label, color }) => {
+                const realName = realNames[key];
+                return (
+                    <label
+                        key={key}
+                        className="flex items-center gap-1.5 cursor-pointer text-xs select-none"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <input
+                            type="checkbox"
+                            checked={visibleSensors[key]}
+                            onChange={() =>
+                                setVisibleSensors((prev) => ({ ...prev, [key]: !prev[key] }))
+                            }
+                            className="w-3 h-3 rounded accent-current"
+                            style={{ accentColor: color }}
+                        />
+                        <span className="w-2 h-0.5 inline-block" style={{ backgroundColor: color }} />
+                        <span className={visibleSensors[key] ? 'text-white' : 'text-[#98A6D4]'}>
+                            {realName ? (
+                                <>
+                                    <span className="text-zinc-500">{label}: </span>
+                                    <span title={`node_id: ${nodeMappings.find(m => m.field === key)?.nodeId}`}>{realName}</span>
+                                </>
+                            ) : label}
+                        </span>
+                    </label>
+                );
+            })}
+            {nodeMappings.length > 0 && (
+                <span className="ml-auto text-[10px] text-emerald-500 font-mono flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse" />
+                    LIVE · {nodeMappings.length} nodes
+                </span>
+            )}
         </div>
+    );
+}
+
+// ─── SIM BADGE ───────────────────────────────────────────────────────────────
+function SimBadge() {
+    return (
+        <span
+            title="Derived from live sensor data — not a direct connector reading"
+            className="text-[9px] font-bold uppercase tracking-wider text-zinc-500 border border-zinc-600 px-1.5 py-0.5 rounded"
+        >
+            Simulated
+        </span>
     );
 }
 
@@ -1215,6 +1248,7 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
         isStreaming,
         triggerAnomaly,
         connectorStatus,
+        nodeMappings,
     } = useConnectorTimeline(activeConnectorId, granularity);
 
     const lastTimestamp = useMemo(
@@ -1426,21 +1460,19 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
                         config={layers[0]}
                         expanded={expandedLayer === 'product'}
                         onToggleExpand={() => handleToggleExpand('product')}
-                        stats={latestProduct && (
+                        stats={
                             <div className="flex items-center gap-4 text-xs">
-                                <span className="text-violet-600 font-mono">
-                                    {formatNumber(latestProduct.output)} units/min
-                                </span>
-                                <span
-                                    className={`font-mono ${latestProduct.uptime >= 95
-                                        ? 'text-emerald-600'
-                                        : 'text-slate-500'
-                                        }`}
-                                >
-                                    {latestProduct.uptime.toFixed(1)}% uptime
-                                </span>
+                                <SimBadge />
+                                {latestProduct && (
+                                    <>
+                                        <span className="text-violet-600 font-mono">{formatNumber(latestProduct.output)} units/min</span>
+                                        <span className={`font-mono ${latestProduct.uptime >= 95 ? 'text-emerald-600' : 'text-slate-500'}`}>
+                                            {latestProduct.uptime.toFixed(1)}% uptime
+                                        </span>
+                                    </>
+                                )}
                             </div>
-                        )}
+                        }
                     />
                     {(!expandedLayer || expandedLayer === 'product') && (
                         <div className="px-2">
@@ -1493,6 +1525,7 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
                             <SensorFilterBar
                                 visibleSensors={visibleSensors}
                                 setVisibleSensors={setVisibleSensors}
+                                nodeMappings={nodeMappings}
                             />
                             <div className="px-2">
                                 <SensorLayer
@@ -1518,19 +1551,20 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
                         config={layers[2]}
                         expanded={expandedLayer === 'energy'}
                         onToggleExpand={() => handleToggleExpand('energy')}
-                        stats={latestEnergy && (
+                        stats={
                             <div className="flex items-center gap-4 text-xs">
-                                <span className="text-amber-600 font-mono">
-                                    {latestEnergy.powerDraw} kW
-                                </span>
-                                <span className="text-yellow-600 font-mono">
-                                    {latestEnergy.efficiency.toFixed(1)}% eff
-                                </span>
-                                <span className="text-yellow-700 flex items-center gap-1">
-                                    <Zap size={12} /> {latestEnergy.costPerHour.toFixed(2)} AED/h
-                                </span>
+                                <SimBadge />
+                                {latestEnergy && (
+                                    <>
+                                        <span className="text-amber-600 font-mono">{latestEnergy.powerDraw} kW</span>
+                                        <span className="text-yellow-600 font-mono">{latestEnergy.efficiency.toFixed(1)}% eff</span>
+                                        <span className="text-yellow-700 flex items-center gap-1">
+                                            <Zap size={12} /> {latestEnergy.costPerHour.toFixed(2)} AED/h
+                                        </span>
+                                    </>
+                                )}
                             </div>
-                        )}
+                        }
                     />
                     {(!expandedLayer || expandedLayer === 'energy') && (
                         <div className="px-2">
@@ -1557,9 +1591,8 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
                         onToggleExpand={() => handleToggleExpand('actions')}
                         stats={
                             <div className="flex items-center gap-4 text-xs">
-                                <span className="text-indigo-600 font-mono">
-                                    {actionData.length} events
-                                </span>
+                                <SimBadge />
+                                <span className="text-indigo-600 font-mono">{actionData.length} events</span>
                                 <span className="text-indigo-500 flex items-center gap-1 font-mono">
                                     <Bot size={10} /> {aiCount} AI
                                 </span>

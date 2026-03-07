@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
-import { AlertTriangle, ArrowRight, Check, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { AlertTriangle, ArrowRight, Check, RefreshCw, X, Zap } from 'lucide-react';
 import { ApiError } from '@/lib/services/backend';
-import { createConnector, discoverConnector } from '@/lib/services/connector.service';
-import type { ConnectorType, DiscoveryResponse } from '@/lib/types/connector';
+import { createConnector, discoverConnector, listConnectors } from '@/lib/services/connector.service';
+import type { ConnectorResponse, ConnectorType, DiscoveryResponse } from '@/lib/types/connector';
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 
@@ -51,6 +51,38 @@ export function ConnectorModal({ onClose, onConnected }: ConnectorModalProps) {
     const [statusText, setStatusText] = useState('');
     const [error, setError] = useState('');
     const [discovery, setDiscovery] = useState<DiscoveryResponse | null>(null);
+    const [savedConnectors, setSavedConnectors] = useState<ConnectorResponse[]>([]);
+    const [loadingSaved, setLoadingSaved] = useState(true);
+    const [quickConnectId, setQuickConnectId] = useState<string | null>(null);
+
+    useEffect(() => {
+        listConnectors()
+            .then(setSavedConnectors)
+            .catch(() => {})
+            .finally(() => setLoadingSaved(false));
+    }, []);
+
+    async function handleQuickConnect(connector: ConnectorResponse) {
+        setQuickConnectId(connector.id);
+        setStep('connecting');
+        setStatusText('Loading cached discovery…');
+        try {
+            const result = await discoverConnector(connector.id);
+            setDiscovery(result);
+            setStep('connected');
+        } catch (err: unknown) {
+            const detail =
+                err instanceof ApiError
+                    ? err.status === 503
+                        ? `Cannot reach ${connector.endpoint}`
+                        : `Server error ${err.status}`
+                    : 'Network error';
+            setError(`Failed to connect: ${detail}`);
+            setStep('error');
+        } finally {
+            setQuickConnectId(null);
+        }
+    }
 
     async function handleConnect() {
         const trimmedEndpoint = endpoint.trim();
@@ -123,6 +155,48 @@ export function ConnectorModal({ onClose, onConnected }: ConnectorModalProps) {
                 {/* ── FORM ── */}
                 {step === 'form' && (
                     <div className="px-6 py-5 space-y-5">
+
+                        {/* Saved connectors */}
+                        {!loadingSaved && savedConnectors.length > 0 && (
+                            <div>
+                                <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2 block">
+                                    Saved Connectors
+                                </label>
+                                <div className="space-y-1.5">
+                                    {savedConnectors.map((c) => (
+                                        <div
+                                            key={c.id}
+                                            className="flex items-center gap-2.5 px-3 py-2 bg-zinc-800/50 border border-zinc-700 rounded-lg"
+                                        >
+                                            <span className="text-[9px] font-bold font-mono bg-zinc-700 text-zinc-300 px-1.5 py-0.5 rounded uppercase shrink-0">
+                                                {c.type}
+                                            </span>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-xs text-white truncate">{c.name}</p>
+                                                <p className="text-[10px] text-zinc-500 font-mono truncate">{c.endpoint}</p>
+                                            </div>
+                                            <button
+                                                onClick={() => handleQuickConnect(c)}
+                                                disabled={quickConnectId === c.id}
+                                                className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/20 rounded-lg transition-colors disabled:opacity-50 shrink-0"
+                                            >
+                                                {quickConnectId === c.id ? (
+                                                    <RefreshCw size={10} className="animate-spin" />
+                                                ) : (
+                                                    <Zap size={10} />
+                                                )}
+                                                Connect
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="flex items-center gap-3 my-4">
+                                    <div className="flex-1 border-t border-zinc-700/60" />
+                                    <span className="text-[10px] text-zinc-500 uppercase tracking-wide">or new</span>
+                                    <div className="flex-1 border-t border-zinc-700/60" />
+                                </div>
+                            </div>
+                        )}
 
                         {/* Protocol */}
                         <div>
