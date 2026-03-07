@@ -157,6 +157,28 @@ function deriveProduct(s: SensorReading): ProductMetric {
     return { timestamp: s.timestamp, output, target: 1200, uptime };
 }
 
+/**
+ * Deterministic energy derivation from real sensor readings.
+ * No PRNG — same sensor input always produces same energy output.
+ */
+function deriveEnergy(s: SensorReading): EnergyReading {
+    const powerDraw = Math.round((50 + s.temperature * 1.5 + s.vibration * 8) * 10) / 10;
+    const coolingLoad = Math.round(powerDraw * 0.3 * 10) / 10;
+    const efficiency = Math.round(Math.max(60, 100 - Math.max(0, s.vibration - 3) * 5) * 10) / 10;
+    const costPerHour = Math.round(powerDraw * 0.45 * 100) / 100;
+    return { timestamp: s.timestamp, powerDraw, coolingLoad, efficiency, costPerHour };
+}
+
+/**
+ * Deterministic product metric derivation from real sensor readings.
+ * No PRNG — values are fully determined by sensor inputs.
+ */
+function deriveProduct(s: SensorReading): ProductMetric {
+    const uptime = Math.round(Math.max(60, 100 - Math.max(0, s.vibration - 3) * 5) * 10) / 10;
+    const output = Math.round(1200 * (uptime / 100));
+    return { timestamp: s.timestamp, output, target: 1200, uptime };
+}
+
 // ─── HOOK ─────────────────────────────────────────────────────────────────────
 
 export function useConnectorTimeline(
@@ -225,6 +247,7 @@ export function useConnectorTimeline(
             } catch (err) {
                 if (cancelled) return;
                 const httpStatus = err instanceof ApiError ? err.status : null;
+                console.error('[Connector] Discovery failed:', err);
                 setStatus(httpStatus === 404 ? 'not_found' : 'error');
                 return;
             }
@@ -291,6 +314,9 @@ export function useConnectorTimeline(
 
             if (!anySuccess) {
                 consecutiveErrorsRef.current += 1;
+                console.warn(
+                    `[Connector] All reads failed (${consecutiveErrorsRef.current}/${MAX_CONSECUTIVE_ERRORS})`,
+                );
                 if (consecutiveErrorsRef.current >= MAX_CONSECUTIVE_ERRORS) {
                     connectedRef.current = false;
                     setStatus('error');
