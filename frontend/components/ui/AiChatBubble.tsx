@@ -1,42 +1,21 @@
 'use client'
 
-import { MOCK_TEAM } from '@/lib/hooks/useOpshubMockData'
-import { useOpshubStore } from '@/lib/store/opshub-store'
-import s from '@/styles/ai-chat/chat.module.css'
-import { ArrowUp, Minus, Sparkles, X } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import {
+    AlertCircle, ArrowUp, BookOpen, Brain, ChevronDown,
+    FileText, Loader2, MessageSquare, Minus, Paperclip, Plus,
+    Sparkles, Trash2, Upload, Wrench, X,
+} from 'lucide-react'
+import type { Conversation, KBDocument, LocalMessage, MemoryEntry, ModelCatalog, ToolCallEntry } from '@/lib/types/chat'
+import {
+    addMemory, createConversation, deleteConversation,
+    deleteMemory, getMessages, listConversations,
+    listMemories, streamMessage,
+} from '@/lib/services/chat.service'
+import { getModelCatalog, loadModel } from '@/lib/services/llm.service'
+import { deleteDocument, listDocuments, uploadDocument } from '@/lib/services/knowledge-base.service'
 
-interface Message {
-    id: string
-    role: 'user' | 'assistant'
-    content: string
-}
-
-const SUGGESTIONS = [
-    'Summarize recent alerts',
-    'Generate a report based on timeline data and the associated Munich incident context. Assign a specific task to the Maintenance Engineer (Ahmed Nasser).',
-    'Show energy report',
-]
-
-// Helper to format text with emojis
-const formatMessageText = (text: string) => {
-    // Replace specific keywords/tags with emojis
-    let formatted = text
-        .replace(/\[FIX\]/g, '🛠️')
-        .replace(/\[CHECK\]/g, '✅')
-        .replace(/\[ALERT\]/g, '⚠️')
-        .replace(/\[INFO\]/g, 'ℹ️')
-        .replace(/\[MAINTENANCE\]/g, '🔧')
-        .replace(/\[CHECKIN\]/g, '📍')
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Simple bold support
-
-    // specific phrases replacement if needed
-    if (formatted.includes('Repair Task')) {
-        formatted = formatted.replace('Repair Task', '🛠️ Repair Task')
-    }
-
-    return <span dangerouslySetInnerHTML={{ __html: formatted }} />
-}
+// ─── LOGO ─────────────────────────────────────────────────────────────────────
 
 function OpsFlowLogo({ className }: { className?: string }) {
     return (
@@ -51,251 +30,861 @@ function OpsFlowLogo({ className }: { className?: string }) {
     )
 }
 
+// ─── INLINE MARKDOWN FORMATTER ────────────────────────────────────────────────
+
+function inlineFormat(text: string): ReactNode {
+    const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g)
+    return (
+        <>
+            {parts.map((part, i) => {
+                if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
+                    return <code key={i} className="bg-zinc-200 text-zinc-800 rounded px-1 font-mono text-xs">{part.slice(1, -1)}</code>
+                }
+                if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+                    return <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>
+                }
+                if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
+                    return <em key={i}>{part.slice(1, -1)}</em>
+                }
+                return <span key={i}>{part}</span>
+            })}
+        </>
+    )
+}
+
+function renderMarkdown(text: string): ReactNode {
+    const lines = text.split('\n')
+    const elements: ReactNode[] = []
+    let i = 0
+
+    while (i < lines.length) {
+        const line = lines[i]
+
+        if (line.startsWith('```')) {
+            const codeLines: string[] = []
+            i++
+            while (i < lines.length && !lines[i].startsWith('```')) {
+                codeLines.push(lines[i])
+                i++
+            }
+            elements.push(
+                <pre key={i} className="bg-zinc-800 text-zinc-100 rounded-lg p-3 my-2 overflow-x-auto text-xs font-mono leading-relaxed">
+                    <code>{codeLines.join('\n')}</code>
+                </pre>
+            )
+        } else if (line.startsWith('### ')) {
+            elements.push(<p key={i} className="font-semibold text-sm mt-2 mb-0.5">{inlineFormat(line.slice(4))}</p>)
+        } else if (line.startsWith('## ')) {
+            elements.push(<p key={i} className="font-bold text-sm mt-2 mb-0.5">{inlineFormat(line.slice(3))}</p>)
+        } else if (line.startsWith('# ')) {
+            elements.push(<p key={i} className="font-bold text-sm mt-2 mb-0.5">{inlineFormat(line.slice(2))}</p>)
+        } else if (line.startsWith('- ') || line.startsWith('* ')) {
+            elements.push(
+                <div key={i} className="flex gap-2 my-0.5 ml-1">
+                    <span className="flex-shrink-0 text-zinc-400 mt-[6px] w-1 h-1 rounded-full bg-current" />
+                    <span>{inlineFormat(line.slice(2))}</span>
+                </div>
+            )
+        } else if (/^\d+\. /.test(line)) {
+            const num = line.match(/^(\d+)\. /)?.[1]
+            elements.push(
+                <div key={i} className="flex gap-2 my-0.5 ml-1">
+                    <span className="flex-shrink-0 text-zinc-400 min-w-[1.2rem] text-xs">{num}.</span>
+                    <span>{inlineFormat(line.replace(/^\d+\. /, ''))}</span>
+                </div>
+            )
+        } else if (line.trim() === '') {
+            if (elements.length > 0) elements.push(<div key={i} className="h-1.5" />)
+        } else {
+            elements.push(<span key={i} className="block">{inlineFormat(line)}</span>)
+        }
+
+        i++
+    }
+
+    return <div className="space-y-0.5 text-sm leading-relaxed">{elements}</div>
+}
+
+// ─── TOOL CALL CARD ───────────────────────────────────────────────────────────
+
+function ToolCallCard({ toolCall }: { toolCall: ToolCallEntry }) {
+    const [expanded, setExpanded] = useState(false)
+    return (
+        <div className="my-1 rounded-xl border border-zinc-200 bg-zinc-50 text-xs overflow-hidden w-full">
+            <button
+                onClick={() => setExpanded(v => !v)}
+                className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-zinc-100 transition-colors"
+            >
+                <Wrench size={12} className="text-zinc-400 flex-shrink-0" />
+                <span className="font-mono font-semibold text-zinc-700 flex-1 truncate">{toolCall.name}</span>
+                <ChevronDown size={12} className={`text-zinc-400 transition-transform flex-shrink-0 ${expanded ? 'rotate-180' : ''}`} />
+            </button>
+            {expanded && (
+                <div className="px-3 pb-3 space-y-2 border-t border-zinc-200">
+                    {toolCall.arguments && (
+                        <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400 mt-2 mb-1">Arguments</p>
+                            <pre className="bg-zinc-800 text-zinc-100 rounded-lg p-2 overflow-x-auto text-[10px] font-mono">
+                                {JSON.stringify(toolCall.arguments, null, 2)}
+                            </pre>
+                        </div>
+                    )}
+                    {toolCall.result !== undefined && (
+                        <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400 mb-1">Result</p>
+                            <pre className="bg-emerald-950 text-emerald-200 rounded-lg p-2 overflow-x-auto text-[10px] font-mono whitespace-pre-wrap">
+                                {toolCall.result}
+                            </pre>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    )
+}
+
+// ─── SIDE PANEL TAB TYPE ──────────────────────────────────────────────────────
+
+type SideTab = 'conversations' | 'docs' | 'memory'
+
+// ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
+
 export function AiChatBubble() {
     const [open, setOpen] = useState(false)
-    const [messages, setMessages] = useState<Message[]>([])
+    const [sideOpen, setSideOpen] = useState(false)
+    const [activeTab, setActiveTab] = useState<SideTab>('conversations')
+
+    // Conversations
+    const [conversations, setConversations] = useState<Conversation[]>([])
+    const [activeConvId, setActiveConvId] = useState<string | null>(null)
+    const [messages, setMessages] = useState<LocalMessage[]>([])
+    const [loadingConvs, setLoadingConvs] = useState(false)
+
+    // Streaming
+    const [streaming, setStreaming] = useState(false)
+    const abortRef = useRef<AbortController | null>(null)
+    const streamingIdRef = useRef('')
+
+    // Input
     const [input, setInput] = useState('')
-    const [typing, setTyping] = useState(false)
-    const scrollRef = useRef<HTMLDivElement>(null)
     const inputRef = useRef<HTMLTextAreaElement>(null)
+    const scrollRef = useRef<HTMLDivElement>(null)
 
-    // Store access for demo actions
-    const selectedWorkOrderId = useOpshubStore(s => s.selectedWorkOrderId)
-    const workOrders = useOpshubStore(s => s.workOrders)
-    const addTask = useOpshubStore(s => s.addTask)
-    const updateTask = useOpshubStore(s => s.updateTask)
-    const currentUser = useOpshubStore(s => s.currentUser)
+    // Model catalog
+    const [catalog, setCatalog] = useState<ModelCatalog | null>(null)
+    const [modelDropdown, setModelDropdown] = useState(false)
+    const [loadingModel, setLoadingModel] = useState(false)
+    const [currentModelId, setCurrentModelId] = useState<string | null>(null)
 
+    // Documents
+    const [documents, setDocuments] = useState<KBDocument[]>([])
+    const [loadingDocs, setLoadingDocs] = useState(false)
+    const [uploadingDoc, setUploadingDoc] = useState(false)
+    const fileInputRef = useRef<HTMLInputElement>(null)
+
+    // Memory
+    const [memories, setMemories] = useState<MemoryEntry[]>([])
+    const [loadingMem, setLoadingMem] = useState(false)
+    const [newMemory, setNewMemory] = useState('')
+
+    // Error
+    const [error, setError] = useState<string | null>(null)
+    const [noModelLoaded, setNoModelLoaded] = useState(false)
+
+    // ── Auto-scroll ────────────────────────────────────────────────────────
     const scrollToBottom = useCallback(() => {
-        if (scrollRef.current) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }, [])
+
+    useEffect(() => { scrollToBottom() }, [messages, scrollToBottom])
+
+    // ── Load catalog on open ───────────────────────────────────────────────
+    useEffect(() => {
+        if (!open) return
+        getModelCatalog()
+            .then(cat => {
+                setCatalog(cat)
+                setCurrentModelId(prev => prev ?? cat.current_model ?? cat.default_model)
+            })
+            .catch(err => console.error('[Chat] catalog load failed:', err))
+    }, [open])
+
+    // ── Load conversations on open ─────────────────────────────────────────
+    const loadConvMessages = useCallback(async (convId: string) => {
+        try {
+            const msgs = await getMessages(convId)
+            setMessages(msgs.map(m => ({
+                id: m.id,
+                role: m.role,
+                content: m.content,
+                tool_calls: m.tool_calls ?? undefined,
+                created_at: m.created_at,
+            })))
+        } catch (e) {
+            console.error('[Chat] load messages failed:', e)
         }
     }, [])
 
     useEffect(() => {
-        scrollToBottom()
-    }, [messages, typing, scrollToBottom])
-
-    const handleSend = useCallback((text?: string) => {
-        const content = (text ?? input).trim()
-        if (!content) return
-
-        const userMsg: Message = { id: `u-${Date.now()}`, role: 'user', content }
-        setMessages((prev) => [...prev, userMsg])
-        setInput('')
-        setTyping(true)
-
-        // DEMO LOGIC: Intercept specific prompt
-        const isDemoPrompt = content.includes('Munich incident') && content.includes('Maintenance Engineer')
-
-        setTimeout(() => {
-            let aiResponse = `I'll help you with that. Analyzing "${content}"...`
-
-            if (isDemoPrompt) {
-                // Find target Work Order (Selected OR Latest)
-                const targetWo = selectedWorkOrderId
-                    ? workOrders.find(w => w.id === selectedWorkOrderId)
-                    : workOrders[workOrders.length - 1]
-
-                if (targetWo) {
-                    // Update task logic
-                    const reliabTask = targetWo.tasks.find(t =>
-                        t.assignee.id === currentUser?.id && t.status !== 'completed'
-                    )
-
-                    if (reliabTask) {
-                        updateTask(targetWo.id, reliabTask.id, {
-                            status: 'in-progress',
-                            updates: [
-                                ...(reliabTask.updates || []),
-                                {
-                                    id: `u-${Date.now()}`,
-                                    author: {
-                                        id: 'ai-agent',
-                                        name: 'OpsFlow AI',
-                                        role: 'System',
-                                        avatarInitials: 'AI',
-                                        avatarColor: 'bg-cyan-500',
-                                        status: 'available',
-                                        facility: 'Global'
-                                    },
-                                    content: 'AI Analysis run: Cross-facility correlation confirmed (87% with Munich). Recommended immediate bearing replacement.',
-                                    createdAt: new Date().toISOString(),
-                                    attachments: []
-                                }
-                            ]
-                        })
-                    }
-
-                    // Create task logic
-                    const maintenanceEng = MOCK_TEAM.find(m => m.role.includes('Maintenance')) || MOCK_TEAM[2]
-
-                    if (maintenanceEng) {
-                        addTask(targetWo.id, {
-                            type: 'execution',
-                            title: 'Replace Bearing Assembly (AI Generated)',
-                            description: 'Based on the cross-facility analysis of the Munich incident, the bearing assembly shows 87% similarity in vibration patterns pre-failure. Immediate replacement recommended to prevent seizure.',
-                            assignee: maintenanceEng,
-                            assignedBy: currentUser || MOCK_TEAM[0],
-                            priority: 'high'
-                        })
-
-                        aiResponse = `Analysis complete. I've detected a high correlation (87%) with the Munich incident. \n\nI have automatically created a **Repair Task** for **${maintenanceEng.name}** to replace the bearing assembly immediately.`
-                    } else {
-                        aiResponse = "I could not find a Maintenance Engineer to assign the task to."
-                    }
-                } else {
-                    aiResponse = "Please open a Work Order first to assign tasks."
+        if (!open) return
+        setLoadingConvs(true)
+        listConversations()
+            .then(convs => {
+                setConversations(convs)
+                if (convs.length > 0 && !activeConvId) {
+                    setActiveConvId(convs[0].id)
+                    loadConvMessages(convs[0].id)
                 }
-            } else if (content.includes('Summarize')) {
-                aiResponse = "Recent alerts show a spike in vibration on Motor A7 and minor temperature fluctuations in the Cooling System. Overall facility health is 92%."
+            })
+            .catch(err => console.error('[Chat] list conversations failed:', err))
+            .finally(() => setLoadingConvs(false))
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open])
+
+    // ── Load docs / memory when sidebar tab opens ──────────────────────────
+    useEffect(() => {
+        if (!sideOpen) return
+        if (activeTab === 'docs') {
+            setLoadingDocs(true)
+            listDocuments().then(setDocuments).catch(console.error).finally(() => setLoadingDocs(false))
+        }
+        if (activeTab === 'memory') {
+            setLoadingMem(true)
+            listMemories().then(setMemories).catch(console.error).finally(() => setLoadingMem(false))
+        }
+    }, [sideOpen, activeTab])
+
+    // ── Escape to close ────────────────────────────────────────────────────
+    useEffect(() => {
+        const h = (e: KeyboardEvent) => { if (e.key === 'Escape' && open) setOpen(false) }
+        window.addEventListener('keydown', h)
+        return () => window.removeEventListener('keydown', h)
+    }, [open])
+
+    // ── Close model dropdown on outside click ──────────────────────────────
+    useEffect(() => {
+        if (!modelDropdown) return
+        const h = () => setModelDropdown(false)
+        window.addEventListener('click', h)
+        return () => window.removeEventListener('click', h)
+    }, [modelDropdown])
+
+    // ── Send message ───────────────────────────────────────────────────────
+    const handleSend = useCallback(async (text?: string) => {
+        const content = (text ?? input).trim()
+        if (!content || streaming) return
+        setInput('')
+        setError(null)
+        setNoModelLoaded(false)
+
+        // Ensure we have an active conversation
+        let convId = activeConvId
+        if (!convId) {
+            try {
+                const modelId = currentModelId ?? catalog?.default_model ?? ''
+                const conv = await createConversation({ model_id: modelId })
+                setConversations(prev => [conv, ...prev])
+                setActiveConvId(conv.id)
+                convId = conv.id
+            } catch (e) {
+                setError('Failed to create conversation')
+                return
+            }
+        }
+
+        // Add user message
+        const userMsg: LocalMessage = {
+            id: `user-${Date.now()}`,
+            role: 'user',
+            content,
+            created_at: new Date().toISOString(),
+        }
+        setMessages(prev => [...prev, userMsg])
+
+        // Add streaming placeholder
+        const streamId = `streaming-${Date.now()}`
+        streamingIdRef.current = streamId
+        setMessages(prev => [...prev, {
+            id: streamId,
+            role: 'assistant',
+            content: '',
+            created_at: new Date().toISOString(),
+            streaming: true,
+        }])
+        setStreaming(true)
+
+        const abort = new AbortController()
+        abortRef.current = abort
+
+        try {
+            let finalMessageId: string | null = null
+
+            for await (const event of streamMessage(convId, content, {}, abort.signal)) {
+                if (abort.signal.aborted) break
+
+                switch (event.type) {
+                    case 'token':
+                        setMessages(prev => prev.map(m =>
+                            m.id === streamingIdRef.current
+                                ? { ...m, content: m.content + (event.content ?? '') }
+                                : m
+                        ))
+                        break
+
+                    case 'tool_call':
+                        setMessages(prev => prev.map(m => {
+                            if (m.id !== streamingIdRef.current) return m
+                            const entry: ToolCallEntry = {
+                                name: event.name ?? 'unknown',
+                                arguments: event.arguments,
+                            }
+                            return { ...m, tool_calls: [...(m.tool_calls ?? []), entry] }
+                        }))
+                        break
+
+                    case 'tool_result':
+                        setMessages(prev => prev.map(m => {
+                            if (m.id !== streamingIdRef.current) return m
+                            const calls = [...(m.tool_calls ?? [])]
+                            const idx = calls.findLastIndex(tc => tc.result === undefined)
+                            if (idx >= 0) {
+                                calls[idx] = { ...calls[idx], result: event.result_preview ?? '' }
+                            }
+                            return { ...m, tool_calls: calls }
+                        }))
+                        break
+
+                    case 'done':
+                        finalMessageId = event.message_id ?? null
+                        break
+
+                    case 'error': {
+                        const errMsg = event.error ?? 'Stream error'
+                        if (errMsg.toLowerCase().includes('no model loaded')) {
+                            setNoModelLoaded(true)
+                        } else {
+                            setError(errMsg)
+                        }
+                        break
+                    }
+                }
             }
 
-            const aiMsg: Message = {
-                id: `a-${Date.now()}`,
-                role: 'assistant',
-                content: aiResponse,
+            // Finalize: replace streaming id with real message_id
+            setMessages(prev => prev.map(m =>
+                m.id === streamingIdRef.current
+                    ? { ...m, id: finalMessageId ?? m.id, streaming: false }
+                    : m
+            ))
+        } catch (e: unknown) {
+            if (e instanceof Error && e.name === 'AbortError') {
+                // Finalize partial content on abort
+                setMessages(prev => prev.map(m =>
+                    m.id === streamingIdRef.current ? { ...m, streaming: false } : m
+                ))
+                return
             }
-            setMessages((prev) => [...prev, aiMsg])
-            setTyping(false)
-        }, 1500)
-    }, [input, addTask, updateTask, selectedWorkOrderId, workOrders, currentUser])
+            const msg = e instanceof Error ? e.message : 'Failed to send message'
+            setError(msg)
+            setMessages(prev => prev.filter(m => m.id !== streamingIdRef.current))
+        } finally {
+            setStreaming(false)
+            abortRef.current = null
+        }
+    }, [input, streaming, activeConvId, currentModelId, catalog?.default_model])
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault()
-            handleSend()
+            void handleSend()
         }
     }, [handleSend])
 
-    // Close on Escape
-    useEffect(() => {
-        const handler = (e: KeyboardEvent) => {
-            if (e.key === 'Escape' && open) setOpen(false)
+    // ── Conversation management ────────────────────────────────────────────
+    async function handleNewConversation() {
+        try {
+            const modelId = currentModelId ?? catalog?.default_model ?? ''
+            const conv = await createConversation({ model_id: modelId })
+            setConversations(prev => [conv, ...prev])
+            setActiveConvId(conv.id)
+            setMessages([])
+        } catch (e) {
+            console.error('[Chat] create conversation failed:', e)
         }
-        window.addEventListener('keydown', handler)
-        return () => window.removeEventListener('keydown', handler)
-    }, [open])
+    }
 
-    const isEmpty = messages.length === 0
+    async function handleDeleteConversation(id: string) {
+        try {
+            await deleteConversation(id)
+            setConversations(prev => prev.filter(c => c.id !== id))
+            if (activeConvId === id) {
+                setActiveConvId(null)
+                setMessages([])
+            }
+        } catch (e) {
+            console.error('[Chat] delete conversation failed:', e)
+        }
+    }
 
+    async function handleSelectConversation(conv: Conversation) {
+        if (conv.id === activeConvId) return
+        setActiveConvId(conv.id)
+        setMessages([])
+        await loadConvMessages(conv.id)
+    }
+
+    // ── Model switching ────────────────────────────────────────────────────
+    async function handleLoadModel(modelId: string) {
+        if (loadingModel) return
+        // Skip only if already loaded AND currently selected (not just selected)
+        const alreadyLoaded = catalog?.models.find(m => m.id === modelId)?.is_loaded
+        if (alreadyLoaded && modelId === currentModelId) return
+        setLoadingModel(true)
+        setModelDropdown(false)
+        try {
+            await loadModel(modelId)
+            setCurrentModelId(modelId)
+            setNoModelLoaded(false)
+            const cat = await getModelCatalog()
+            setCatalog(cat)
+        } catch (e) {
+            console.error('[Chat] load model failed:', e)
+        } finally {
+            setLoadingModel(false)
+        }
+    }
+
+    // ── Document management ────────────────────────────────────────────────
+    async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+        const file = e.target.files?.[0]
+        if (!file) return
+        const title = file.name.replace(/\.[^.]+$/, '')
+        setUploadingDoc(true)
+        try {
+            const doc = await uploadDocument(file, title)
+            setDocuments(prev => [doc, ...prev])
+            // Open sidebar on the docs tab so user sees the upload
+            setSideOpen(true)
+            setActiveTab('docs')
+        } catch (err) {
+            console.error('[Chat] upload failed:', err)
+        } finally {
+            setUploadingDoc(false)
+            if (fileInputRef.current) fileInputRef.current.value = ''
+        }
+    }
+
+    async function handleDeleteDocument(id: string) {
+        try {
+            await deleteDocument(id)
+            setDocuments(prev => prev.filter(d => d.id !== id))
+        } catch (e) {
+            console.error('[Chat] delete document failed:', e)
+        }
+    }
+
+    // ── Memory management ──────────────────────────────────────────────────
+    async function handleAddMemory() {
+        if (!newMemory.trim()) return
+        try {
+            const m = await addMemory(newMemory.trim())
+            setMemories(prev => [m, ...prev])
+            setNewMemory('')
+        } catch (e) {
+            console.error('[Chat] add memory failed:', e)
+        }
+    }
+
+    async function handleDeleteMemory(id: number) {
+        try {
+            await deleteMemory(id)
+            setMemories(prev => prev.filter(m => m.id !== id))
+        } catch (e) {
+            console.error('[Chat] delete memory failed:', e)
+        }
+    }
+
+    // ── Derived ────────────────────────────────────────────────────────────
+    const activeConv = conversations.find(c => c.id === activeConvId)
+    const currentModel = catalog?.models.find(m => m.id === currentModelId)
+
+    // ── Render ─────────────────────────────────────────────────────────────
     return (
         <>
-            {/* Chat Popup */}
+            {/* ── Chat Panel ──────────────────────────────────────────────── */}
             {open && (
-                <div className={s.chatContainer}>
-                    {/* Header */}
-                    <div className={s.header}>
-                        <div className={s.titleGroup}>
-                            <span className={s.titleText}>OpsFlow AI</span>
-                            <span className={s.autoBadge}>Auto</span>
+                <div className={`fixed bottom-[88px] right-6 z-[99] flex h-[560px] bg-[#FDFEFE] border border-[#98A6D4] rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.12)] overflow-hidden transition-all duration-300 ${sideOpen ? 'w-[640px]' : 'w-[420px]'}`}>
+
+                    {/* ── Sidebar ─────────────────────────────────────────── */}
+                    {sideOpen && (
+                        <div className="w-[216px] flex-shrink-0 border-r border-[rgba(152,166,212,0.2)] flex flex-col">
+                            {/* Tab bar */}
+                            <div className="flex border-b border-[rgba(152,166,212,0.2)] flex-shrink-0">
+                                {([
+                                    ['conversations', MessageSquare, 'Conversations'],
+                                    ['docs', FileText, 'Documents'],
+                                    ['memory', Brain, 'Memory'],
+                                ] as [SideTab, React.ElementType, string][]).map(([tab, Icon, label]) => (
+                                    <button
+                                        key={tab}
+                                        onClick={() => setActiveTab(tab)}
+                                        title={label}
+                                        className={`flex-1 py-3 flex items-center justify-center transition-colors ${activeTab === tab
+                                            ? 'text-[#3A3A3A] border-b-2 border-[#3A3A3A]'
+                                            : 'text-[#98A6D4] hover:text-[#3A3A3A]'
+                                        }`}
+                                    >
+                                        <Icon size={15} />
+                                    </button>
+                                ))}
+                            </div>
+
+                            {/* Tab content */}
+                            <div className="flex-1 overflow-y-auto p-2.5 space-y-1">
+
+                                {/* Conversations */}
+                                {activeTab === 'conversations' && (
+                                    <>
+                                        <button
+                                            onClick={handleNewConversation}
+                                            className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium bg-[#F2F5FF] text-[#3A3A3A] hover:bg-[#E8EDFF] transition-colors mb-2"
+                                        >
+                                            <Plus size={12} /> New conversation
+                                        </button>
+                                        {loadingConvs && (
+                                            <div className="flex justify-center py-4">
+                                                <Loader2 size={14} className="animate-spin text-zinc-400" />
+                                            </div>
+                                        )}
+                                        {conversations.map(conv => (
+                                            <div
+                                                key={conv.id}
+                                                onClick={() => handleSelectConversation(conv)}
+                                                className={`group flex items-center gap-1 rounded-xl px-2.5 py-2 cursor-pointer transition-colors ${conv.id === activeConvId ? 'bg-[#F2F5FF]' : 'hover:bg-[#F7F9FF]'}`}
+                                            >
+                                                <span className="flex-1 text-xs text-[#3A3A3A] truncate leading-tight">
+                                                    {conv.title ?? `Conv ${conv.id.slice(0, 8)}`}
+                                                </span>
+                                                <button
+                                                    onClick={e => { e.stopPropagation(); handleDeleteConversation(conv.id) }}
+                                                    className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition-all flex-shrink-0 p-0.5"
+                                                >
+                                                    <Trash2 size={11} />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </>
+                                )}
+
+                                {/* Documents */}
+                                {activeTab === 'docs' && (
+                                    <>
+                                        <button
+                                            onClick={() => fileInputRef.current?.click()}
+                                            disabled={uploadingDoc}
+                                            className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium bg-[#F2F5FF] text-[#3A3A3A] hover:bg-[#E8EDFF] transition-colors disabled:opacity-50 mb-2"
+                                        >
+                                            {uploadingDoc
+                                                ? <Loader2 size={12} className="animate-spin" />
+                                                : <Upload size={12} />
+                                            }
+                                            Upload document
+                                        </button>
+                                        {loadingDocs && (
+                                            <div className="flex justify-center py-4">
+                                                <Loader2 size={14} className="animate-spin text-zinc-400" />
+                                            </div>
+                                        )}
+                                        {documents.length === 0 && !loadingDocs && (
+                                            <p className="text-xs text-zinc-400 text-center py-4">No documents yet</p>
+                                        )}
+                                        {documents.map(doc => (
+                                            <div key={doc.id} className="group flex items-start gap-2 rounded-xl px-2.5 py-2 hover:bg-[#F7F9FF] transition-colors">
+                                                <BookOpen size={12} className="text-zinc-400 flex-shrink-0 mt-0.5" />
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-xs text-[#3A3A3A] truncate">{doc.title}</p>
+                                                    <p className="text-[10px] text-zinc-400">{doc.chunk_count} chunks</p>
+                                                </div>
+                                                <button
+                                                    onClick={() => handleDeleteDocument(doc.id)}
+                                                    className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition-all flex-shrink-0 p-0.5"
+                                                >
+                                                    <Trash2 size={11} />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </>
+                                )}
+
+                                {/* Memory */}
+                                {activeTab === 'memory' && (
+                                    <>
+                                        <div className="flex gap-1.5 mb-2">
+                                            <input
+                                                value={newMemory}
+                                                onChange={e => setNewMemory(e.target.value)}
+                                                onKeyDown={e => { if (e.key === 'Enter') void handleAddMemory() }}
+                                                placeholder="Add memory..."
+                                                className="flex-1 text-xs border border-[#98A6D4] rounded-xl px-2.5 py-1.5 outline-none focus:border-blue-400 bg-white min-w-0"
+                                            />
+                                            <button
+                                                onClick={() => void handleAddMemory()}
+                                                disabled={!newMemory.trim()}
+                                                className="p-1.5 rounded-xl bg-[#3A3A3A] text-white disabled:opacity-40 flex-shrink-0"
+                                            >
+                                                <Plus size={12} />
+                                            </button>
+                                        </div>
+                                        {loadingMem && (
+                                            <div className="flex justify-center py-4">
+                                                <Loader2 size={14} className="animate-spin text-zinc-400" />
+                                            </div>
+                                        )}
+                                        {memories.length === 0 && !loadingMem && (
+                                            <p className="text-xs text-zinc-400 text-center py-4">No memories yet</p>
+                                        )}
+                                        {memories.map(mem => (
+                                            <div key={mem.id} className="group flex items-start gap-2 rounded-xl px-2.5 py-2 hover:bg-[#F7F9FF] transition-colors">
+                                                <p className="flex-1 text-xs text-[#3A3A3A] leading-relaxed">{mem.content}</p>
+                                                <button
+                                                    onClick={() => void handleDeleteMemory(mem.id)}
+                                                    className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition-all flex-shrink-0 p-0.5"
+                                                >
+                                                    <Trash2 size={11} />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </>
+                                )}
+                            </div>
                         </div>
-                        <div className={s.headerControls}>
+                    )}
+
+                    {/* ── Main Chat ────────────────────────────────────────── */}
+                    <div className="flex flex-col flex-1 min-w-0">
+
+                        {/* Header */}
+                        <div className="h-[52px] flex items-center gap-2 px-3 border-b border-[rgba(152,166,212,0.2)] bg-gradient-to-r from-[#FDFEFE] to-[#F2F5FF] flex-shrink-0">
+                            {/* Sidebar toggle */}
+                            <button
+                                onClick={() => setSideOpen(v => !v)}
+                                title="Conversations, Documents & Memory"
+                                className={`flex items-center gap-1.5 px-2 py-1 rounded-lg transition-colors flex-shrink-0 text-xs font-medium ${sideOpen ? 'bg-[#E8EDFF] text-[#3A3A3A]' : 'text-[#98A6D4] hover:bg-[#F2F5FF] hover:text-[#3A3A3A]'}`}
+                            >
+                                <MessageSquare size={13} />
+                                <span className="hidden sm:inline">Chats</span>
+                            </button>
+
+                            {/* Title */}
+                            <span className="text-sm font-bold text-[#3A3A3A] flex-1 truncate min-w-0">
+                                {activeConv?.title ?? 'OpsFlow AI'}
+                            </span>
+
+                            {/* Model switcher */}
+                            <div className="relative flex-shrink-0" onClick={e => e.stopPropagation()}>
+                                <button
+                                    onClick={() => setModelDropdown(v => !v)}
+                                    disabled={loadingModel || !catalog}
+                                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold bg-[#F2F5FF] text-[#3A3A3A] hover:bg-[#E8EDFF] transition-colors disabled:opacity-50 max-w-[100px]"
+                                >
+                                    {loadingModel
+                                        ? <Loader2 size={10} className="animate-spin flex-shrink-0" />
+                                        : null
+                                    }
+                                    <span className="truncate">{currentModel?.display_name ?? currentModelId ?? '—'}</span>
+                                    <ChevronDown size={10} className="flex-shrink-0" />
+                                </button>
+                                {modelDropdown && catalog && (
+                                    <div className="absolute top-full right-0 mt-1 w-60 bg-white border border-[#98A6D4] rounded-xl shadow-xl z-20 py-1 overflow-hidden">
+                                        {catalog.models.map(m => (
+                                            <button
+                                                key={m.id}
+                                                onClick={() => void handleLoadModel(m.id)}
+                                                className={`w-full flex items-start gap-2 px-3 py-2.5 text-left hover:bg-[#F2F5FF] transition-colors ${m.id === currentModelId ? 'bg-[#F2F5FF]' : ''}`}
+                                            >
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-xs font-semibold text-[#3A3A3A] truncate">{m.display_name}</p>
+                                                    <p className="text-[10px] text-zinc-400 mt-0.5">
+                                                        {m.memory_required_gb.toFixed(1)} GB · {m.context_length.toLocaleString()} ctx
+                                                    </p>
+                                                </div>
+                                                {m.is_loaded && (
+                                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 flex-shrink-0" title="Loaded" />
+                                                )}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Minimize */}
                             <button
                                 onClick={() => setOpen(false)}
-                                className={s.controlBtn}
+                                className="w-6 h-6 flex items-center justify-center text-[#98A6D4] hover:text-[#3A3A3A] transition-colors flex-shrink-0"
                             >
-                                <Minus size={16} />
+                                <Minus size={14} />
                             </button>
+
+                            {/* Close (clears nothing) */}
                             <button
-                                onClick={() => { setOpen(false); setMessages([]) }}
-                                className={s.controlBtn}
+                                onClick={() => setOpen(false)}
+                                className="w-6 h-6 flex items-center justify-center text-[#98A6D4] hover:text-[#3A3A3A] transition-colors flex-shrink-0"
                             >
-                                <X size={16} />
+                                <X size={14} />
                             </button>
                         </div>
-                    </div>
 
-                    {/* Messages */}
-                    <div ref={scrollRef} className={s.messagesArea}>
-                        {isEmpty && !typing && (
-                            <div className="flex flex-col items-center justify-center h-full gap-4 opacity-70">
-                                <div className="h-12 w-12 rounded-full bg-cyan-500/10 flex items-center justify-center">
-                                    <Sparkles size={24} className="text-cyan-500" />
+                        {/* Messages */}
+                        <div
+                            ref={scrollRef}
+                            className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#FDFEFE] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-zinc-200 [&::-webkit-scrollbar-thumb]:rounded-full"
+                        >
+                            {messages.length === 0 && !streaming && (
+                                <div className="flex flex-col items-center justify-center h-full gap-3 text-center">
+                                    <div className="h-10 w-10 rounded-full bg-cyan-500/10 flex items-center justify-center">
+                                        <Sparkles size={20} className="text-cyan-500" />
+                                    </div>
+                                    <div>
+                                        <p className="text-sm font-semibold text-[#3A3A3A]">OpsFlow AI</p>
+                                        <p className="text-xs text-[#6B7280] mt-0.5">Ask anything about your facility</p>
+                                    </div>
                                 </div>
-                                <div className="text-center">
-                                    <p className="text-sm font-semibold text-[#3A3A3A]">OpsFlow AI Assistant</p>
-                                    <p className="text-xs text-[#6B7280] mt-1">Ask me anything about your facility</p>
+                            )}
+
+                            {messages.map(msg => (
+                                <div key={msg.id} className={`flex gap-2.5 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                    {msg.role === 'assistant' && (
+                                        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-zinc-700 to-zinc-900 flex items-center justify-center flex-shrink-0 shadow-sm mt-0.5">
+                                            <Sparkles size={13} className="text-white" />
+                                        </div>
+                                    )}
+
+                                    <div className={`flex flex-col gap-1 ${msg.role === 'user' ? 'items-end max-w-[80%]' : 'items-start max-w-[85%]'}`}>
+                                        {/* Tool calls */}
+                                        {msg.tool_calls?.map((tc, i) => (
+                                            <ToolCallCard key={i} toolCall={tc} />
+                                        ))}
+
+                                        {/* Content bubble */}
+                                        {(msg.content || msg.streaming) && (
+                                            <div className={`px-3 py-2.5 rounded-2xl ${msg.role === 'user'
+                                                ? 'bg-[#3A3A3A] text-white rounded-tr-sm'
+                                                : 'bg-[#F2F5FF] text-[#3A3A3A] rounded-tl-sm'
+                                            }`}>
+                                                {msg.role === 'assistant' ? (
+                                                    msg.streaming && !msg.content ? (
+                                                        <span className="flex gap-1 items-center h-4">
+                                                            <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce [animation-delay:0ms]" />
+                                                            <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce [animation-delay:150ms]" />
+                                                            <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce [animation-delay:300ms]" />
+                                                        </span>
+                                                    ) : renderMarkdown(msg.content)
+                                                ) : (
+                                                    <span className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</span>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {msg.role === 'user' && (
+                                        <div className="w-7 h-7 rounded-full bg-zinc-200 flex items-center justify-center flex-shrink-0 mt-0.5">
+                                            <span className="text-[10px] font-bold text-zinc-600">ME</span>
+                                        </div>
+                                    )}
                                 </div>
-                                <div className="w-full space-y-1.5 mt-2">
-                                    {SUGGESTIONS.map((sug) => (
-                                        <button
-                                            key={sug}
-                                            onClick={() => handleSend(sug)}
-                                            className="w-full text-left px-3 py-2 rounded-lg text-xs text-[#6B7280] hover:text-[#3A3A3A] hover:bg-[#F2F5FF] transition-colors"
-                                        >
-                                            {sug}
-                                        </button>
-                                    ))}
-                                </div>
+                            ))}
+                        </div>
+
+                        {/* No model loaded banner — server is warming up */}
+                        {noModelLoaded && (
+                            <div className="mx-3 mb-2 flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 text-xs">
+                                <Loader2 size={13} className="animate-spin flex-shrink-0" />
+                                <span className="flex-1">Model loading on server, please wait a moment and try again.</span>
+                                <button onClick={() => setNoModelLoaded(false)} className="flex-shrink-0 hover:text-amber-900">
+                                    <X size={12} />
+                                </button>
                             </div>
                         )}
 
-                        {messages.map((msg) => (
-                            <div key={msg.id} className={`${s.messageRow} ${msg.role === 'user' ? s.user : ''}`}>
-                                {msg.role === 'assistant' && (
-                                    <div className={`${s.avatar} ${s.aiAvatar}`}>
-                                        <Sparkles size={14} />
-                                    </div>
-                                )}
-                                <div className={`${s.bubble} ${msg.role === 'user' ? s.userBubble : s.aiBubble}`}>
-                                    <div className={s.formattedText}>
-                                        {msg.role === 'assistant' ? formatMessageText(msg.content) : msg.content}
-                                    </div>
-                                </div>
-                                {msg.role === 'user' && (
-                                    <div className={`${s.avatar} ${s.userAvatar}`}>
-                                        <span className="text-[10px] font-bold">ME</span>
-                                    </div>
-                                )}
-                            </div>
-                        ))}
-
-                        {typing && (
-                            <div className={s.messageRow}>
-                                <div className={`${s.avatar} ${s.aiAvatar}`}>
-                                    <Sparkles size={14} />
-                                </div>
-                                <div className={`${s.bubble} ${s.aiBubble} flex items-center gap-1`}>
-                                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce [animation-delay:0ms]" />
-                                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce [animation-delay:150ms]" />
-                                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce [animation-delay:300ms]" />
-                                </div>
+                        {/* Generic error banner */}
+                        {error && (
+                            <div className="mx-3 mb-2 flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-600 text-xs">
+                                <AlertCircle size={13} className="flex-shrink-0" />
+                                <span className="flex-1">{error}</span>
+                                <button onClick={() => setError(null)} className="flex-shrink-0 hover:text-red-800">
+                                    <X size={12} />
+                                </button>
                             </div>
                         )}
-                    </div>
 
-                    {/* Input */}
-                    <div className={s.inputContainer}>
-                        <div className={s.inputWrapper}>
-                            <textarea
-                                ref={inputRef}
-                                value={input}
-                                onChange={(e) => setInput(e.target.value)}
-                                onKeyDown={handleKeyDown}
-                                placeholder="Ask OpsFlow AI..."
-                                rows={1}
-                                className={s.textInput}
-                            />
-                            <button
-                                onClick={() => handleSend()}
-                                disabled={!input.trim()}
-                                className={s.sendBtn}
-                            >
-                                <ArrowUp size={16} />
-                            </button>
+                        {/* Always-mounted hidden file input */}
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            className="hidden"
+                            accept=".pdf,.txt,.md,.docx,.csv"
+                            onChange={handleFileUpload}
+                        />
+
+                        {/* Input */}
+                        <div className="p-3 border-t border-[rgba(152,166,212,0.1)] bg-[#FDFEFE] flex-shrink-0">
+                            <div className={`flex items-center gap-1.5 bg-[#F2F5FF] border rounded-[28px] px-3 py-1.5 transition-colors ${streaming ? 'border-[#98A6D4]' : 'border-[#98A6D4] focus-within:border-blue-400 focus-within:bg-white'}`}>
+                                {/* Attach file */}
+                                <button
+                                    onClick={() => fileInputRef.current?.click()}
+                                    disabled={uploadingDoc}
+                                    title="Upload document to knowledge base"
+                                    className="w-7 h-7 flex items-center justify-center text-zinc-400 hover:text-[#3A3A3A] transition-colors flex-shrink-0 disabled:opacity-40"
+                                >
+                                    {uploadingDoc
+                                        ? <Loader2 size={15} className="animate-spin" />
+                                        : <Paperclip size={15} />
+                                    }
+                                </button>
+
+                                <textarea
+                                    ref={inputRef}
+                                    value={input}
+                                    onChange={e => setInput(e.target.value)}
+                                    onKeyDown={handleKeyDown}
+                                    placeholder={streaming ? 'Generating...' : 'Ask OpsFlow AI...'}
+                                    disabled={streaming}
+                                    rows={1}
+                                    className="flex-1 bg-transparent border-none outline-none text-sm text-[#3A3A3A] placeholder:text-zinc-400 resize-none min-h-[24px] max-h-[80px] py-1 disabled:opacity-50"
+                                />
+                                {streaming ? (
+                                    <button
+                                        onClick={() => abortRef.current?.abort()}
+                                        title="Stop generation"
+                                        className="w-8 h-8 rounded-full bg-red-500 text-white flex items-center justify-center flex-shrink-0 hover:bg-red-600 transition-colors"
+                                    >
+                                        <X size={14} />
+                                    </button>
+                                ) : (
+                                    <button
+                                        onClick={() => void handleSend()}
+                                        disabled={!input.trim()}
+                                        className="w-8 h-8 rounded-full bg-[#3A3A3A] text-white flex items-center justify-center flex-shrink-0 hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+                                    >
+                                        <ArrowUp size={14} />
+                                    </button>
+                                )}
+                            </div>
+                            {uploadingDoc && (
+                                <p className="text-[10px] text-zinc-400 mt-1.5 ml-3">Uploading document...</p>
+                            )}
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* Floating Button (Kept as is, but ensuring styles don't conflict) */}
+            {/* ── Floating Button ──────────────────────────────────────────── */}
             <button
-                onClick={() => setOpen(!open)}
+                onClick={() => setOpen(v => !v)}
                 className={`fixed bottom-6 right-6 z-[100] h-[60px] w-[60px] rounded-full flex items-center justify-center transition-all duration-300 shadow-[0_4px_20px_rgba(145,153,200,0.3)] border-2 ${open
                     ? 'bg-zinc-800 border-zinc-600 text-zinc-400 rotate-90 hover:bg-zinc-700 hover:text-white'
                     : 'bg-[#FDFEFE] border-[#9199C8] text-[#9199C8] hover:scale-110 hover:shadow-[0_6px_28px_rgba(145,153,200,0.45)]'
-                    }`}
+                }`}
             >
                 {open ? <X size={24} /> : <OpsFlowLogo className="w-8 h-8" />}
             </button>

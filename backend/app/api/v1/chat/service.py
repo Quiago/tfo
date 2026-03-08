@@ -19,7 +19,8 @@ from uuid import uuid4
 
 from sqlmodel import Session, select
 
-from app.api.v1.chat.context import build_context, parse_tool_call
+from app.api.v1.chat.context import OPENAI_TOOL_SCHEMAS, build_context, parse_tool_call
+from app.api.v1.chat.llm_config import ModelConfig, get_model_config
 from app.api.v1.chat.exceptions import (
     ConversationAccessDenied,
     ConversationNotFound,
@@ -114,9 +115,10 @@ async def send_message(conversation_id: str, user_id: int, content: str, max_new
     _auto_title(conv, content, session)
 
     messages = list_messages(conversation_id, user_id, session)
-    context = build_context(conv, messages, memories, enable_tools=True)
+    model_config = get_model_config(conv.model_id)
+    context = build_context(conv, messages, memories, model_config=model_config)
 
-    final_text, tool_calls_log = await _run_tool_loop(context, max_new_tokens, temperature, session)
+    final_text, tool_calls_log = await _run_tool_loop(context, max_new_tokens, temperature, session, model_config)
 
     assistant_msg = _save_message(conv.id, "assistant", final_text, session, tool_calls=tool_calls_log or None)
     _touch_conversation(conv, session)
@@ -139,13 +141,15 @@ async def send_message_streaming(conversation_id: str, user_id: int, content: st
     _auto_title(conv, content, session)
 
     messages = list_messages(conversation_id, user_id, session)
-    context = build_context(conv, messages, memories, enable_tools=True)
+    model_config = get_model_config(conv.model_id)
+    context = build_context(conv, messages, memories, model_config=model_config)
+    tools = OPENAI_TOOL_SCHEMAS if model_config.supports_native_tools else None
 
     tool_calls_log: list[dict] = []
     final_text = ""
 
     for iteration in range(_MAX_TOOL_ITERATIONS):
-        response = await engine.generate(context, max_new_tokens, temperature)
+        response = await engine.generate(context, max_new_tokens, temperature, tools=tools)
         tool_name, tool_args = parse_tool_call(response)
 
         if not tool_name:
@@ -163,11 +167,9 @@ async def send_message_streaming(conversation_id: str, user_id: int, content: st
             "result_preview": tool_result[:120] + ("…" if len(tool_result) > 120 else ""),
         }
 
+        formatted_result = model_config.tool_result_formatter(tool_name, tool_result)
         context.append({"role": "assistant", "content": response})
-        context.append({
-            "role": "user",
-            "content": f"Tool result for {tool_name}:\n{tool_result}\n\nNow answer the original question.",
-        })
+        context.append({"role": model_config.tool_result_role, "content": formatted_result})
     else:
         logger.warning("max_tool_iterations", extra={"conversation_id": conversation_id})
         final_text = response  # noqa: F821
@@ -212,11 +214,13 @@ def delete_memory(memory_id: int, user_id: int, session: Session) -> None:
     session.commit()
 
 
-async def _run_tool_loop(context: list[dict], max_new_tokens: int, temperature: float, session: Session) -> tuple[str, list[dict]]:
+async def _run_tool_loop(context: list[dict], max_new_tokens: int, temperature: float, session: Session, model_config: ModelConfig) -> tuple[str, list[dict]]:
     tool_calls_log: list[dict] = []
+    tools = OPENAI_TOOL_SCHEMAS if model_config.supports_native_tools else None
+    response = ""
 
     for iteration in range(_MAX_TOOL_ITERATIONS):
-        response = await engine.generate(context, max_new_tokens, temperature)
+        response = await engine.generate(context, max_new_tokens, temperature, tools=tools)
         tool_name, tool_args = parse_tool_call(response)
 
         if not tool_name:
@@ -226,14 +230,12 @@ async def _run_tool_loop(context: list[dict], max_new_tokens: int, temperature: 
         tool_result = await execute_tool(tool_name, tool_args, session)
         tool_calls_log.append({"name": tool_name, "arguments": tool_args, "result": tool_result})
 
+        formatted_result = model_config.tool_result_formatter(tool_name, tool_result)
         context.append({"role": "assistant", "content": response})
-        context.append({
-            "role": "user",
-            "content": f"Tool result for {tool_name}:\n{tool_result}\n\nNow answer the original question.",
-        })
+        context.append({"role": model_config.tool_result_role, "content": formatted_result})
 
     logger.warning("max_tool_iterations_reached")
-    return response, tool_calls_log  # noqa: F821
+    return response, tool_calls_log
 
 
 def _save_message(conversation_id: str, role: str, content: str, session: Session, tool_calls: list | None = None, tool_call_id: str | None = None) -> Message:
