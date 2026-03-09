@@ -49,3 +49,17 @@ export interface OpcUaReadValue {
   status_code: string;
   source_timestamp: string | null;
 }
+
+export interface BatchReadItem {
+  node_id: string;
+  value: number | string | boolean | null;
+  data_type: string | null;
+  status: string | null;
+  source_timestamp: string | null;
+  error: string | null;
+}
+
+export interface BatchReadResponse {
+  connector_id: string;
+  results: BatchReadItem[];
+}
