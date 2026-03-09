@@ -36,7 +36,7 @@ class ConversationResponse(BaseModel):
 class MessageCreate(BaseModel):
     content: str
     stream: bool = False
-    max_new_tokens: int = 512
+    max_new_tokens: int = 2048
     temperature: float = 0.7
 
 

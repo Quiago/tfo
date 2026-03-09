@@ -38,14 +38,28 @@ from app.api.v1.llms.engine import engine
 logger = logging.getLogger(__name__)
 
 _MAX_TOOL_ITERATIONS = 5
-_THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL)
+_THINK_CLOSED_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL)
+_THINK_OPEN_RE = re.compile(r"<think>(.*)", re.DOTALL)
+
+# Delay between streamed words (seconds). Keeps SSE frames small enough for the
+# OS TCP stack to flush them individually, producing a visible typing effect.
+_STREAM_WORD_DELAY = 0.01
 
 
 def _extract_thinking(text: str) -> tuple[str, str | None]:
-    """Strip <think>…</think> from text. Returns (clean_text, thinking_content | None)."""
-    m = _THINK_RE.search(text)
+    """Strip <think>…</think> from text. Returns (clean_text, thinking_content | None).
+
+    Handles both closed tags and unclosed tags (truncated by max_new_tokens).
+    """
+    # Prefer closed tag — strip all occurrences, capture first block
+    m = _THINK_CLOSED_RE.search(text)
     if m:
-        return _THINK_RE.sub("", text).strip(), m.group(1).strip()
+        return _THINK_CLOSED_RE.sub("", text).strip(), m.group(1).strip()
+    # Fallback: unclosed <think> (model was cut off before </think>)
+    # Everything from <think> to end of string is treated as thinking.
+    m = _THINK_OPEN_RE.search(text)
+    if m:
+        return text[: m.start()].strip(), m.group(1).strip()
     return text, None
 
 
@@ -217,7 +231,7 @@ async def send_message_streaming(conversation_id: str, user_id: int, content: st
     for i, word in enumerate(words):
         chunk = word + (" " if i < len(words) - 1 else "")
         yield {"type": "token", "content": chunk}
-        await asyncio.sleep(0)  # yield to event loop so SSE actually flushes word by word
+        await asyncio.sleep(_STREAM_WORD_DELAY)  # small delay so OS flushes each SSE frame individually
 
     assistant_msg = _save_message(conv.id, "assistant", final_text, session, tool_calls=tool_calls_log or None)
     _touch_conversation(conv, session)
