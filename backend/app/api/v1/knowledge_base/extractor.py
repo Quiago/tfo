@@ -211,4 +211,4 @@ def extract_text(content: bytes, mime_type: str) -> str:
         except UnicodeDecodeError:
             pass
 
-    raise UnsupportedFileType
+    raise UnsupportedFileType(base_mime)

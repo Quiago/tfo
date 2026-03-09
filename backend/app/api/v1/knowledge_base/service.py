@@ -24,7 +24,11 @@ async def upload_document(file: UploadFile, title: str, user_id: str, session: S
     Eleva UnsupportedFileType si el MIME no está soportado.
     """
     content = await file.read()
-    mime_type = file.content_type or "text/plain"
+    mime_type = file.content_type or "application/octet-stream"
+    logger.info(
+        "upload_attempt — filename=%s mime=%s size=%d user=%s",
+        file.filename, mime_type, len(content), user_id,
+    )
     text = extract_text(content, mime_type)
     chunks = chunk_text(text)
     embedder = get_embedder()
