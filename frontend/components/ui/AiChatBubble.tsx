@@ -143,6 +143,29 @@ function ToolCallCard({ toolCall }: { toolCall: ToolCallEntry }) {
     )
 }
 
+// ─── THINKING BLOCK ───────────────────────────────────────────────────────────
+
+function ThinkingBlock({ content }: { content: string }) {
+    const [expanded, setExpanded] = useState(false)
+    return (
+        <div className="my-1 rounded-xl border border-violet-200 bg-violet-50 text-xs overflow-hidden w-full">
+            <button
+                onClick={() => setExpanded(v => !v)}
+                className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-violet-100 transition-colors"
+            >
+                <Brain size={12} className="text-violet-400 flex-shrink-0" />
+                <span className="font-medium text-violet-600 flex-1">Thinking</span>
+                <ChevronDown size={12} className={`text-violet-400 transition-transform flex-shrink-0 ${expanded ? 'rotate-180' : ''}`} />
+            </button>
+            {expanded && (
+                <div className="px-3 pb-3 border-t border-violet-200">
+                    <p className="text-[11px] text-violet-600 mt-2 whitespace-pre-wrap leading-relaxed">{content}</p>
+                </div>
+            )}
+        </div>
+    )
+}
+
 // ─── SIDE PANEL TAB TYPE ──────────────────────────────────────────────────────
 
 type SideTab = 'conversations' | 'docs' | 'memory'
@@ -320,6 +343,14 @@ export function AiChatBubble() {
                         setMessages(prev => prev.map(m =>
                             m.id === streamingIdRef.current
                                 ? { ...m, content: m.content + (event.content ?? '') }
+                                : m
+                        ))
+                        break
+
+                    case 'thinking':
+                        setMessages(prev => prev.map(m =>
+                            m.id === streamingIdRef.current
+                                ? { ...m, thinking: event.content ?? '' }
                                 : m
                         ))
                         break
@@ -764,6 +795,9 @@ export function AiChatBubble() {
                                     )}
 
                                     <div className={`flex flex-col gap-1 ${msg.role === 'user' ? 'items-end max-w-[80%]' : 'items-start max-w-[85%]'}`}>
+                                        {/* Thinking block */}
+                                        {msg.thinking && <ThinkingBlock content={msg.thinking} />}
+
                                         {/* Tool calls */}
                                         {msg.tool_calls?.map((tc, i) => (
                                             <ToolCallCard key={i} toolCall={tc} />
