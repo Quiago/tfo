@@ -158,9 +158,43 @@ function deriveProduct(s: SensorReading): ProductMetric {
 }
 
 /**
- * Deterministic energy derivation from real sensor readings.
- * No PRNG — same sensor input always produces same energy output.
+ * Converts raw OPC-UA counter values (e.g. monotonically-incrementing Floats
+ * in the millions) into a 0–100 normalized value relative to the observed
+ * range in the last NORMALIZE_WINDOW readings.
+ *
+ * This makes counter-style sensors visible as a trend in charts instead of
+ * a flat line at an extreme Y position.
+ *
+ * If spread < 0.001 (truly static value), returns the raw value unchanged
+ * so the chart at least shows the actual reading.
  */
+function windowNormalize(
+    raw: number,
+    field: MappedField,
+    history: SensorReading[],
+): number {
+    if (history.length < 2) return raw;
+    const window = history.slice(-NORMALIZE_WINDOW);
+    const vals = window.map((s) => s[field] as number).filter(isFinite);
+    if (vals.length < 2) return raw;
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+    const spread = max - min;
+    if (spread < 0.001) return raw; // static — keep raw so user sees actual value
+    return Math.round(((raw - min) / spread) * 100 * 100) / 100; // 0–100 range
+}
+
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
+
+function extractNumericFromBatchItem(value: unknown): number | null {
+    if (typeof value === 'number' && isFinite(value)) return value;
+    if (typeof value === 'string') {
+        const n = parseFloat(value);
+        if (!isNaN(n) && isFinite(n)) return n;
+    }
+    return null;
+}
+
 function deriveEnergy(s: SensorReading): EnergyReading {
     const powerDraw = Math.round((50 + s.temperature * 1.5 + s.vibration * 8) * 10) / 10;
     const coolingLoad = Math.round(powerDraw * 0.3 * 10) / 10;
@@ -169,10 +203,6 @@ function deriveEnergy(s: SensorReading): EnergyReading {
     return { timestamp: s.timestamp, powerDraw, coolingLoad, efficiency, costPerHour };
 }
 
-/**
- * Deterministic product metric derivation from real sensor readings.
- * No PRNG — values are fully determined by sensor inputs.
- */
 function deriveProduct(s: SensorReading): ProductMetric {
     const uptime = Math.round(Math.max(60, 100 - Math.max(0, s.vibration - 3) * 5) * 10) / 10;
     const output = Math.round(1200 * (uptime / 100));
@@ -314,9 +344,6 @@ export function useConnectorTimeline(
 
             if (!anySuccess) {
                 consecutiveErrorsRef.current += 1;
-                console.warn(
-                    `[Connector] All reads failed (${consecutiveErrorsRef.current}/${MAX_CONSECUTIVE_ERRORS})`,
-                );
                 if (consecutiveErrorsRef.current >= MAX_CONSECUTIVE_ERRORS) {
                     connectedRef.current = false;
                     setStatus('error');
