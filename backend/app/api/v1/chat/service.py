@@ -13,6 +13,7 @@ Flujo de inferencia (send_message):
 """
 import json
 import logging
+import re
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -36,6 +37,15 @@ from app.api.v1.llms.engine import engine
 logger = logging.getLogger(__name__)
 
 _MAX_TOOL_ITERATIONS = 5
+_THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL)
+
+
+def _extract_thinking(text: str) -> tuple[str, str | None]:
+    """Strip <think>…</think> from text. Returns (clean_text, thinking_content | None)."""
+    m = _THINK_RE.search(text)
+    if m:
+        return _THINK_RE.sub("", text).strip(), m.group(1).strip()
+    return text, None
 
 
 def create_conversation(data: ConversationCreate, user_id: int, session: Session) -> Conversation:
@@ -119,6 +129,7 @@ async def send_message(conversation_id: str, user_id: int, content: str, max_new
     context = build_context(conv, messages, memories, model_config=model_config)
 
     final_text, tool_calls_log = await _run_tool_loop(context, max_new_tokens, temperature, session, model_config)
+    final_text, _ = _extract_thinking(final_text)  # strip think block before saving
 
     assistant_msg = _save_message(conv.id, "assistant", final_text, session, tool_calls=tool_calls_log or None)
     _touch_conversation(conv, session)
@@ -168,16 +179,24 @@ async def send_message_streaming(conversation_id: str, user_id: int, content: st
         }
 
         formatted_result = model_config.tool_result_formatter(tool_name, tool_result)
-        context.append({"role": "assistant", "content": response})
+        # Strip thinking from intermediate assistant turns before adding to context
+        clean_response, _ = _extract_thinking(response)
+        context.append({"role": "assistant", "content": clean_response})
         context.append({"role": model_config.tool_result_role, "content": formatted_result})
     else:
         logger.warning("max_tool_iterations", extra={"conversation_id": conversation_id})
         final_text = response  # noqa: F821
 
+    # Extract and emit thinking block, then stream clean text token by token
+    final_text, thinking = _extract_thinking(final_text)
+    if thinking:
+        yield {"type": "thinking", "content": thinking}
+
     words = final_text.split(" ")
     for i, word in enumerate(words):
         chunk = word + (" " if i < len(words) - 1 else "")
         yield {"type": "token", "content": chunk}
+        await asyncio.sleep(0)  # yield to event loop so SSE actually flushes word by word
 
     assistant_msg = _save_message(conv.id, "assistant", final_text, session, tool_calls=tool_calls_log or None)
     _touch_conversation(conv, session)
@@ -224,18 +243,21 @@ async def _run_tool_loop(context: list[dict], max_new_tokens: int, temperature: 
         tool_name, tool_args = parse_tool_call(response)
 
         if not tool_name:
-            return response, tool_calls_log
+            clean, _ = _extract_thinking(response)
+            return clean, tool_calls_log
 
         logger.info("tool_call_executed", extra={"tool": tool_name, "iteration": iteration})
         tool_result = await execute_tool(tool_name, tool_args, session)
         tool_calls_log.append({"name": tool_name, "arguments": tool_args, "result": tool_result})
 
         formatted_result = model_config.tool_result_formatter(tool_name, tool_result)
-        context.append({"role": "assistant", "content": response})
+        clean_response, _ = _extract_thinking(response)
+        context.append({"role": "assistant", "content": clean_response})
         context.append({"role": model_config.tool_result_role, "content": formatted_result})
 
     logger.warning("max_tool_iterations_reached")
-    return response, tool_calls_log
+    clean, _ = _extract_thinking(response)  # noqa: F821
+    return clean, tool_calls_log
 
 
 def _save_message(conversation_id: str, role: str, content: str, session: Session, tool_calls: list | None = None, tool_call_id: str | None = None) -> Message:

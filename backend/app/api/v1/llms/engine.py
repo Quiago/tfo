@@ -10,11 +10,15 @@ import logging
 import uuid
 from pathlib import Path
 
+import os
+
 import torch
 
 logger = logging.getLogger(__name__)
 
-MODELS_DIR = Path("models")
+# Override via MODELS_DIR env var to point at a RunPod network volume,
+# e.g. MODELS_DIR=/runpod-volume/models
+MODELS_DIR = Path(os.environ.get("MODELS_DIR", "models"))
 _CUDA_AVAILABLE = torch.cuda.is_available()
 
 _VLLM_AVAILABLE = False
@@ -48,7 +52,17 @@ class VLLMEngine:
             if self._current_model_id:
                 await self._unload()
             if _VLLM_AVAILABLE and _CUDA_AVAILABLE:
-                await self._load_vllm(model_id, dtype)
+                try:
+                    await self._load_vllm(model_id, dtype)
+                except Exception as exc:
+                    logger.warning(
+                        "[Engine] vLLM falló al inicializar (%s). "
+                        "Causa común: VRAM insuficiente, versión CUDA incompatible, "
+                        "o proceso vLLM terminado inesperadamente. "
+                        "Intentando fallback con transformers...",
+                        exc,
+                    )
+                    await self._load_transformers(model_id, dtype)
             else:
                 await self._load_transformers(model_id, dtype)
 

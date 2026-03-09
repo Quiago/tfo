@@ -34,6 +34,7 @@ export interface LocalMessage {
     role: 'user' | 'assistant'
     content: string
     tool_calls?: ToolCallEntry[]
+    thinking?: string
     created_at: string
     streaming?: boolean
 }
@@ -41,7 +42,7 @@ export interface LocalMessage {
 // ─── SSE EVENTS ───────────────────────────────────────────────────────────────
 
 export interface StreamEvent {
-    type: 'token' | 'tool_call' | 'tool_result' | 'done' | 'error'
+    type: 'token' | 'tool_call' | 'tool_result' | 'thinking' | 'done' | 'error'
     content?: string
     name?: string
     arguments?: Record<string, unknown>
