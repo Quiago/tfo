@@ -20,6 +20,8 @@ from pathlib import Path
 import psutil
 import torch
 
+from fastapi import HTTPException, status
+
 from app.api.v1.llms import exceptions
 from app.api.v1.llms.engine import MODELS_DIR, engine
 from app.api.v1.llms.schemas import CatalogResponse, HealthResponse, ModelInfo
@@ -56,44 +58,52 @@ class ModelConfig:
 
 
 CATALOG: dict[str, ModelConfig] = {
-    "tinyllama-1.1b": ModelConfig(
-        id="tinyllama-1.1b",
-        repo_id="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
-        display_name="TinyLlama 1.1B Chat",
-        description="El más rápido. Ideal para desarrollo y pruebas. ~4 GB RAM.",
-        context_length=2048,
-        memory_required_gb=4.0,
-        supports_tools=False,
-    ),
-    "gemma-2b-it": ModelConfig(
-        id="gemma-2b-it",
-        repo_id="google/gemma-2b-it",
-        display_name="Gemma 2B Instruct",
+    "mistral-7b-awq": ModelConfig(
+        id="mistral-7b-awq",
+        repo_id="TheBloke/Mistral-7B-Instruct-v0.2-AWQ",
+        display_name="Mistral 7B AWQ",
         description=(
-            "Modelo ligero de Google (Gemma 2B instruccional). "
-            "Muy mejor calidad que TinyLlama, sigue siendo usable en CPU. "
-            "~5–6 GB RAM, contexto 8K."
+            "Arquitectura optimizada Grouped-Query Attention. Muy eficiente, "
+            "ideal para T4 con holgura. ~5 GB VRAM, 8K contexto."
+        ),
+        context_length=8192,
+        memory_required_gb=5.0,
+        supports_tools=True,
+        dtype="float16",
+        quantization="awq",
+    ),
+    "llama-3.1-8b-awq": ModelConfig(
+        id="llama-3.1-8b-awq",
+        repo_id="hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4",
+        display_name="Llama 3.1 8B AWQ",
+        description=(
+            "Alternativa estable con ecosistema maduro. "
+            "Native tool calling, ~6 GB VRAM."
         ),
         context_length=8192,
         memory_required_gb=6.0,
-        supports_tools=False,
-        dtype="float16",  # ajusta según cómo cargues el modelo
-    ),
-    "qwen2.5-1.5b": ModelConfig(
-        id="qwen2.5-1.5b",
-        repo_id="Qwen/Qwen2.5-1.5B-Instruct",
-        display_name="Qwen 2.5 1.5B Instruct",
-        description=(
-            "El más capaz del catálogo CPU. Soporta tool calling "
-            "(necesario para consultas de sensor_data en tiempo real). ~6 GB RAM."
-        ),
-        context_length=32768,
-        memory_required_gb=6.0,
         supports_tools=True,
+        dtype="float16",
+        quantization="awq",
+    ),
+    "qwen3-8b-awq": ModelConfig(
+        id="qwen3-8b-awq",
+        repo_id="Qwen/Qwen3-8B-AWQ",
+        display_name="Qwen3 8B AWQ",
+        description=(
+            "Balance óptimo calidad/velocidad en T4. 4-bit AWQ, "
+            "soporta tool calling nativo y reasoning mode. ~10 GB VRAM."
+        ),
+        context_length=32000,
+        memory_required_gb=10.0,
+        supports_tools=True,
+        dtype="float16",
+        quantization="awq",
     ),
 }
 
-DEFAULT_MODEL_ID = "tinyllama-1.1b"
+
+DEFAULT_MODEL_ID = "qwen3-8b-awq"
 
 
 # ---------------------------------------------------------------------------
@@ -120,51 +130,44 @@ async def startup() -> None:
     """
     Punto de entrada del lifespan. Llamado UNA VEZ al arrancar el servidor.
 
-    Orden:
-    1. Crea el directorio local de modelos si no existe.
-    2. Descarga en paralelo los modelos del catálogo que falten en disco.
-    3. Auto-carga el último modelo usado (persistido en llm_state.json),
-       o el DEFAULT_MODEL_ID si es la primera vez.
+    Orden de prioridad — el modelo queda listo en RAM lo antes posible:
+      1. Crea el directorio de modelos.
+      2. Descarga SOLO el modelo prioritario (último usado → default).
+      3. Carga ese modelo en RAM — a partir de aquí el chat ya funciona.
+      4. Descarga los modelos restantes del catálogo en segundo plano.
 
-    El servidor ya acepta requests mientras el modelo carga en background
-    (main.py lanza esta corutina con asyncio.create_task).
+    El servidor acepta requests desde el principio (main.py usa create_task).
     """
     MODELS_DIR.mkdir(exist_ok=True)
-    await _download_all_catalog_models()
 
-    # Determinar qué modelo cargar: último usado → default
+    # ── Paso 1: decidir qué modelo arrancar ───────────────────────────────────
     model_to_load = _load_state() or DEFAULT_MODEL_ID
     if model_to_load not in CATALOG:
         model_to_load = DEFAULT_MODEL_ID
 
+    # ── Paso 2: descargar SOLO el modelo prioritario (si no está en disco) ────
+    priority_config = CATALOG[model_to_load]
+    await _download_if_missing(model_to_load, priority_config)
+
+    # ── Paso 3: cargarlo en RAM — el chat ya puede responder ─────────────────
     model_path = MODELS_DIR / model_to_load
-    if not (model_path.exists() and _has_weights(model_path)):
-        logger.warning(f"[LLMs] No se puede auto-cargar '{model_to_load}': no está descargado.")
-        return
+    if model_path.exists() and _has_weights(model_path):
+        logger.info(f"[LLMs] Auto-cargando modelo al startup: {model_to_load}")
+        try:
+            await load_model(model_to_load)
+            logger.info(f"[LLMs] Modelo listo en RAM: {model_to_load}")
+        except Exception as exc:
+            logger.error(f"[LLMs] Error auto-cargando '{model_to_load}': {exc}")
+    else:
+        logger.warning(f"[LLMs] No se puede auto-cargar '{model_to_load}': pesos no encontrados tras la descarga.")
 
-    logger.info(f"[LLMs] Auto-cargando modelo al startup: {model_to_load}")
-    try:
-        await load_model(model_to_load)
-        logger.info(f"[LLMs] Modelo listo en RAM: {model_to_load}")
-    except Exception as exc:
-        logger.error(f"[LLMs] Error auto-cargando '{model_to_load}': {exc}")
+    # ── Paso 4: descargar el resto del catálogo en segundo plano ─────────────
+    remaining = [
+        (mid, cfg) for mid, cfg in CATALOG.items() if mid != model_to_load
+    ]
+    if remaining:
+        await asyncio.gather(*[_download_if_missing(mid, cfg) for mid, cfg in remaining])
 
-
-async def _download_all_catalog_models() -> None:
-    """
-    Descarga todos los modelos del catálogo que no estén en disco.
-
-    Por qué asyncio.gather: las descargas son I/O independiente entre sí.
-    gather las lanza en "paralelo" (en realidad son corutinas concurrentes
-    sobre el mismo event loop, pero snapshot_download corre en threads).
-    Esto reduce el tiempo total de startup si hay varios modelos que bajar.
-
-    snapshot_download descarga TODOS los archivos del repo HuggingFace:
-    pesos safetensors, tokenizer, config.json, generation_config.json, etc.
-    Los guarda en MODELS_DIR/<model_id>/ para que el engine los encuentre.
-    """
-    tasks = [_download_if_missing(model_id, config) for model_id, config in CATALOG.items()]
-    await asyncio.gather(*tasks)
 
 
 def _has_weights(path: Path) -> bool:
@@ -221,7 +224,14 @@ async def load_model(model_id: str) -> None:
 
     # Delegamos el swap al engine (que maneja el Lock internamente)
     config = CATALOG[model_id]
-    await engine.load(model_id, config.dtype)
+    try:
+        await engine.load(model_id, config.dtype)
+    except Exception as exc:
+        logger.error("[LLMs] engine.load failed for %s: %s", model_id, exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Error cargando el modelo '{model_id}': {exc}",
+        )
     _save_state(model_id)
 
 

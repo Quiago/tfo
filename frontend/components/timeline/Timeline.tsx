@@ -23,7 +23,7 @@ import {
     User,
     Zap,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
     Area,
     CartesianGrid,
@@ -367,8 +367,19 @@ function VideoFrameStrip({ data }: { data: SensorReading[] }) {
 }
 
 // ─── LAYER COMPONENTS ───────────────────────────────────────────────────────
-// ─── LAYER COMPONENTS ───────────────────────────────────────────────────────
-function SensorLayer({
+//
+// xTicks: returns N evenly-spaced integer timestamps within xDomain.
+// Explicit ticks prevent Recharts from generating floating-point positions
+// that collide when the domain scrolls continuously (duplicate key React warning).
+//
+function xTicks(domain: [number, number], count = 5): number[] {
+    const [start, end] = domain;
+    return Array.from({ length: count }, (_, i) =>
+        Math.round(start + (i / (count - 1)) * (end - start)),
+    );
+}
+
+const SensorLayer = memo(function SensorLayer({
     data,
     xDomain,
     granularity,
@@ -390,6 +401,8 @@ function SensorLayer({
         anomaly_y: s.anomaly ? s.vibration : null,
     })), [data]);
 
+    const ticks = useMemo(() => xTicks(xDomain), [xDomain]);
+
     return (
         <div>
             <ResponsiveContainer width="100%" height={height} minWidth={0}>
@@ -404,6 +417,7 @@ function SensorLayer({
                         type="number"
                         scale="time"
                         domain={xDomain}
+                        ticks={ticks}
                         tickFormatter={(v) => formatTimestamp(v, granularity)}
                         tick={{ fontSize: 9, fill: '#FFFFFF' }}
                         axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
@@ -444,9 +458,9 @@ function SensorLayer({
             {visibleSensors.camera && <VideoFrameStrip data={data} />}
         </div>
     );
-}
+});
 
-function EnergyLayer({
+const EnergyLayer = memo(function EnergyLayer({
     data,
     xDomain,
     granularity,
@@ -465,6 +479,8 @@ function EnergyLayer({
         return [0, Math.ceil(max * 1.2)];
     }, [data]);
 
+    const ticks = useMemo(() => xTicks(xDomain), [xDomain]);
+
     return (
         <ResponsiveContainer width="100%" height={height} minWidth={0}>
             <ComposedChart data={data} margin={{ top: 5, right: 20, bottom: 0, left: 0 }}>
@@ -475,6 +491,7 @@ function EnergyLayer({
                     type="number"
                     scale="time"
                     domain={xDomain}
+                    ticks={ticks}
                     tickFormatter={(v) => formatTimestamp(v, granularity)}
                     tick={{ fontSize: 9, fill: '#FFFFFF' }}
                     axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
@@ -525,9 +542,9 @@ function EnergyLayer({
             </ComposedChart>
         </ResponsiveContainer>
     );
-}
+});
 
-function ActionsLayer({
+const ActionsLayer = memo(function ActionsLayer({
     data,
     xDomain,
     granularity,
@@ -545,6 +562,8 @@ function ActionsLayer({
         [data]
     );
 
+    const ticks = useMemo(() => xTicks(xDomain), [xDomain]);
+
     return (
         <ResponsiveContainer width="100%" height={height} minWidth={0}>
             <ScatterChart margin={{ top: 5, right: 20, bottom: 20, left: 0 }}>
@@ -554,6 +573,7 @@ function ActionsLayer({
                     type="number"
                     scale="time"
                     domain={xDomain}
+                    ticks={ticks}
                     tickFormatter={(v) => formatTimestamp(v, granularity)}
                     tick={{ fontSize: 9, fill: '#FFFFFF' }}
                     axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
@@ -605,9 +625,9 @@ function ActionsLayer({
             </ScatterChart>
         </ResponsiveContainer>
     );
-}
+});
 
-function ProductLayer({
+const ProductLayer = memo(function ProductLayer({
     data,
     xDomain,
     granularity,
@@ -626,6 +646,8 @@ function ProductLayer({
         return [Math.min(...vals) * 0.95, Math.max(...vals) * 1.05];
     }, [data]);
 
+    const ticks = useMemo(() => xTicks(xDomain), [xDomain]);
+
     return (
         <ResponsiveContainer width="100%" height={height} minWidth={0}>
             <ComposedChart data={data} margin={{ top: 5, right: 20, bottom: 0, left: 0 }}>
@@ -636,6 +658,7 @@ function ProductLayer({
                     type="number"
                     scale="time"
                     domain={xDomain}
+                    ticks={ticks}
                     tickFormatter={(v) => formatTimestamp(v, granularity)}
                     tick={{ fontSize: 9, fill: '#FFFFFF' }}
                     axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
@@ -672,7 +695,7 @@ function ProductLayer({
             </ComposedChart>
         </ResponsiveContainer>
     );
-}
+});
 
 // ─── LAYER HEADER ───────────────────────────────────────────────────────────
 function LayerHeader({
