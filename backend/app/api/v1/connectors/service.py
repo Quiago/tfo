@@ -114,7 +114,7 @@ def delete_connector(connector_id: str, session: Session) -> None:
     logger.info("connector_deleted", extra={"connector_id": connector_id})
 
 
-def discover(connector_id: str, session: Session, force: bool = False) -> DiscoveryResult:
+async def discover(connector_id: str, session: Session, force: bool = False) -> DiscoveryResult:
     """
     Descubre todos los nodos del sistema externo y los cachea en RAM.
 
@@ -136,7 +136,7 @@ def discover(connector_id: str, session: Session, force: bool = False) -> Discov
 
     backend = _get_backend(connector)
     try:
-        result = backend.discover()
+        result = await backend.discover()
     except NotImplementedError:
         raise BackendNotImplemented
     except Exception as exc:
@@ -168,13 +168,13 @@ def search_nodes(connector_id: str, query: str) -> list[NodeInfo]:
     ]
 
 
-def read(connector_id: str, path: str, session: Session, **kwargs):
+async def read(connector_id: str, path: str, session: Session, **kwargs):
     connector = get_connector(connector_id, session)
     if not connector.is_active:
         raise ConnectorInactive
     backend = _get_backend(connector)
     try:
-        data = backend.read(path, **kwargs)
+        data = await backend.read(path, **kwargs)
     except NotImplementedError:
         raise BackendNotImplemented
     except Exception as exc:
@@ -188,13 +188,13 @@ def read(connector_id: str, path: str, session: Session, **kwargs):
     return data
 
 
-def write(connector_id: str, path: str, value, session: Session, **kwargs) -> None:
+async def write(connector_id: str, path: str, value, session: Session, **kwargs) -> None:
     connector = get_connector(connector_id, session)
     if not connector.is_active:
         raise ConnectorInactive
     backend = _get_backend(connector)
     try:
-        backend.write(path, value, **kwargs)
+        await backend.write(path, value, **kwargs)
     except NotImplementedError:
         raise BackendNotImplemented
     except Exception as exc:
@@ -207,11 +207,11 @@ def write(connector_id: str, path: str, value, session: Session, **kwargs) -> No
     logger.info("connector_write", extra={"connector_id": connector_id, "path": path})
 
 
-def health(connector_id: str, session: Session) -> bool:
+async def health(connector_id: str, session: Session) -> bool:
     connector = get_connector(connector_id, session)
     backend = _get_backend(connector)
     try:
-        return backend.health()
+        return await backend.health()
     except NotImplementedError:
         raise BackendNotImplemented
     except Exception as exc:

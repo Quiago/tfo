@@ -32,7 +32,7 @@ class MCPConnector(ConnectorBackend):
     def __init__(self, connector: Connector):
         super().__init__(connector)
 
-    def read(self, path: str, **kwargs) -> Any:
+    async def read(self, path: str, **kwargs) -> Any:
         """
         path: nombre del tool MCP a invocar, ej: "read_file", "search_emails"
         kwargs: argumentos del tool, ej: path="/home/user/data.csv"
@@ -56,7 +56,7 @@ class MCPConnector(ConnectorBackend):
         """
         raise NotImplementedError("MCP backend not yet implemented. Install MCP SDK: uv add mcp")
 
-    def write(self, path: str, value: Any, **kwargs) -> None:
+    async def write(self, path: str, value: Any, **kwargs) -> None:
         """
         MCP es principalmente read (call_tool). Para operaciones de escritura
         usar tools que acepten un argumento value, ej: write_file, send_email.
@@ -65,7 +65,7 @@ class MCPConnector(ConnectorBackend):
         """
         raise NotImplementedError("MCP backend not yet implemented. Install MCP SDK: uv add mcp")
 
-    def health(self) -> bool:
+    async def health(self) -> bool:
         """
         Verifica que el MCP server responde al initialize handshake.
 

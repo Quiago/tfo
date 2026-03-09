@@ -94,7 +94,7 @@ class ConnectorBackend(ABC):
         self.connector = connector
 
     @abstractmethod
-    def read(self, path: str, **kwargs) -> Any:
+    async def read(self, path: str, **kwargs) -> Any:
         """
         Lee un valor del sistema externo.
 
@@ -105,7 +105,7 @@ class ConnectorBackend(ABC):
         ...
 
     @abstractmethod
-    def write(self, path: str, value: Any, **kwargs) -> None:
+    async def write(self, path: str, value: Any, **kwargs) -> None:
         """
         Escribe un valor en el sistema externo.
 
@@ -116,7 +116,7 @@ class ConnectorBackend(ABC):
         ...
 
     @abstractmethod
-    def health(self) -> bool:
+    async def health(self) -> bool:
         """
         Verifica conectividad con el sistema externo.
         Devuelve True si alcanzable, False si no.
@@ -124,7 +124,7 @@ class ConnectorBackend(ABC):
         """
         ...
 
-    def discover(self) -> DiscoveryResult:
+    async def discover(self) -> DiscoveryResult:
         """
         Descubre todos los nodos/tags disponibles en el sistema externo.
 

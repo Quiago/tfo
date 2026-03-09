@@ -92,12 +92,19 @@ class VLLMEngine:
         logger.info(f"[Engine] Cargando con transformers (CPU): {model_id}")
 
         def _load():
+            # device_map="auto" requires `accelerate`; on CPU just use device=-1
+            load_kwargs: dict = {
+                "dtype": torch.float32,
+                "trust_remote_code": True,
+            }
+            if _CUDA_AVAILABLE:
+                load_kwargs["device_map"] = "auto"   # GPU: accelerate is expected
+            else:
+                load_kwargs["device"] = -1            # CPU: no accelerate needed
             return transformers.pipeline(
                 "text-generation",
                 model=str(model_path),
-                dtype=torch.float32,
-                device_map="auto",
-                trust_remote_code=True,
+                **load_kwargs,
             )
 
         self._pipeline = await asyncio.to_thread(_load)

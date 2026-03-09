@@ -123,14 +123,31 @@ async def startup() -> None:
     Orden:
     1. Crea el directorio local de modelos si no existe.
     2. Descarga en paralelo los modelos del catálogo que falten en disco.
+    3. Auto-carga el último modelo usado (persistido en llm_state.json),
+       o el DEFAULT_MODEL_ID si es la primera vez.
 
-    No se carga ningún modelo en RAM al arrancar (lazy loading).
-    El primer POST /llms/load carga el modelo elegido bajo demanda.
-    Esto evita consumir varios GB de RAM antes de que haya requests reales.
+    El servidor ya acepta requests mientras el modelo carga en background
+    (main.py lanza esta corutina con asyncio.create_task).
     """
     MODELS_DIR.mkdir(exist_ok=True)
     await _download_all_catalog_models()
-    logger.info("[LLMs] Startup completo. Ningún modelo en RAM (lazy load).")
+
+    # Determinar qué modelo cargar: último usado → default
+    model_to_load = _load_state() or DEFAULT_MODEL_ID
+    if model_to_load not in CATALOG:
+        model_to_load = DEFAULT_MODEL_ID
+
+    model_path = MODELS_DIR / model_to_load
+    if not (model_path.exists() and _has_weights(model_path)):
+        logger.warning(f"[LLMs] No se puede auto-cargar '{model_to_load}': no está descargado.")
+        return
+
+    logger.info(f"[LLMs] Auto-cargando modelo al startup: {model_to_load}")
+    try:
+        await load_model(model_to_load)
+        logger.info(f"[LLMs] Modelo listo en RAM: {model_to_load}")
+    except Exception as exc:
+        logger.error(f"[LLMs] Error auto-cargando '{model_to_load}': {exc}")
 
 
 async def _download_all_catalog_models() -> None:
