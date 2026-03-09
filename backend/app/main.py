@@ -4,11 +4,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlmodel import Session
 
 from app.api.v1.router import api_router
 from app.api.v1.llms import service as llm_service
+from app.api.v1.assets.service import auto_import_assets
 from app.core.logging import setup_logging
-from app.db.engine import create_db_and_tables
+from app.db.engine import create_db_and_tables, engine as db_engine
 from app.core.config import settings
 
 
@@ -17,11 +19,14 @@ async def lifespan(app: FastAPI):
     setup_logging()
     create_db_and_tables()
 
-    # Launch model download + auto-load as a background task.
-    # The server starts accepting requests immediately; the model
-    # becomes available once the task finishes (a few seconds on SSD,
-    # longer on first run when it needs to download weights).
-    startup_task = asyncio.create_task(llm_service.startup())
+    async def _startup():
+        # 1. Download + load priority model into RAM.
+        await llm_service.startup()
+        # 2. If asset table is empty, auto-discover + import from active connectors.
+        with Session(db_engine) as session:
+            await auto_import_assets(session)
+
+    startup_task = asyncio.create_task(_startup())
 
     yield
 

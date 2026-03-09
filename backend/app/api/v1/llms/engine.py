@@ -154,14 +154,23 @@ class VLLMEngine:
     @staticmethod
     def _apply_template(tokenizer, messages: list[dict], tools: list | None) -> str:
         """
-        Aplica el chat template con soporte nativo de tools cuando el modelo lo soporta.
-        Fallback silencioso si el template no acepta tools.
+        Aplica el chat template. Intenta inyectar tools= nativamente; si el
+        tokenizer no lo soporta, cae al template sin tools (los schemas ya están
+        en el system prompt como texto via context.py, así que el modelo los ve).
         """
         if tools:
             try:
-                return tokenizer.apply_chat_template(messages, tools=tools, tokenize=False, add_generation_prompt=True)
-            except Exception:
-                logger.warning("[Engine] El modelo no soporta tool calling nativo en su chat template. Usando template sin tools.")
+                prompt = tokenizer.apply_chat_template(
+                    messages, tools=tools, tokenize=False, add_generation_prompt=True
+                )
+                logger.debug("[Engine] Chat template aplicado con tools nativos (%d schemas).", len(tools))
+                return prompt
+            except Exception as exc:
+                logger.warning(
+                    "[Engine] Template nativo de tools falló (%s). "
+                    "El modelo usará el texto del system prompt para saber qué tools existen.",
+                    exc,
+                )
         return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
     @property
