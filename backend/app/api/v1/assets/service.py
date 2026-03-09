@@ -125,13 +125,13 @@ def delete_property(asset_id: str, property_name: str, session: Session) -> None
     logger.info("property_deleted", extra={"asset_id": asset_id, "property": property_name})
 
 
-def read_property(asset_id: str, property_name: str, session: Session) -> AssetReadingResponse:
+async def read_property(asset_id: str, property_name: str, session: Session) -> AssetReadingResponse:
     """
     Lee el valor actual de una propiedad de un asset.
     Resuelve: asset_id + property_name → connector_id + node_id → valor real.
     """
     prop = get_property(asset_id, property_name, session)
-    raw = connector_service.read(prop.connector_id, prop.node_id, session)
+    raw = await connector_service.read(prop.connector_id, prop.node_id, session)
     logger.info("asset_property_read", extra={"asset_id": asset_id, "property": property_name})
     return AssetReadingResponse(
         asset_id=asset_id,
@@ -154,7 +154,7 @@ async def read_all_properties(asset_id: str, session: Session) -> AssetReadingsR
 
     async def _read_one(prop: AssetProperty) -> AssetReadingResponse:
         try:
-            raw = connector_service.read(prop.connector_id, prop.node_id, session)
+            raw = await connector_service.read(prop.connector_id, prop.node_id, session)
             return AssetReadingResponse(
                 asset_id=asset_id,
                 property_name=prop.name,
@@ -316,7 +316,7 @@ async def auto_import_assets(session: Session) -> None:
             logger.warning("[Assets] Auto-import falló para '%s': %s", connector.id, exc)
 
 
-def write_property(asset_id: str, property_name: str, value: Any, session: Session) -> None:
+async def write_property(asset_id: str, property_name: str, value: Any, session: Session) -> None:
     """
     Escribe un valor en la propiedad de un asset.
     Valida que la propiedad esté marcada como writable antes de escribir.
@@ -324,5 +324,5 @@ def write_property(asset_id: str, property_name: str, value: Any, session: Sessi
     prop = get_property(asset_id, property_name, session)
     if not prop.writable:
         raise PropertyNotWritable
-    connector_service.write(prop.connector_id, prop.node_id, value, session)
+    await connector_service.write(prop.connector_id, prop.node_id, value, session)
     logger.info("asset_property_written", extra={"asset_id": asset_id, "property": property_name, "value": value})

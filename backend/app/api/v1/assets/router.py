@@ -82,12 +82,12 @@ async def read_all(asset_id: str, session: Session = Depends(get_session)):
 
 
 @router.get("/{asset_id}/readings/{property_name}", response_model=AssetReadingResponse)
-def read_one(asset_id: str, property_name: str, session: Session = Depends(get_session)):
+async def read_one(asset_id: str, property_name: str, session: Session = Depends(get_session)):
     """Lee UNA propiedad del asset."""
-    return service.read_property(asset_id, property_name, session)
+    return await service.read_property(asset_id, property_name, session)
 
 
 @router.put("/{asset_id}/readings/{property_name}", status_code=status.HTTP_204_NO_CONTENT)
-def write_one(asset_id: str, property_name: str, body: WritePropertyRequest, session: Session = Depends(get_session)):
+async def write_one(asset_id: str, property_name: str, body: WritePropertyRequest, session: Session = Depends(get_session)):
     """Escribe un valor en una propiedad del asset."""
-    service.write_property(asset_id, property_name, body.value, session)
+    await service.write_property(asset_id, property_name, body.value, session)

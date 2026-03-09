@@ -27,7 +27,7 @@ async def _list_assets(session: Session, **_) -> str:
 
 async def _read_asset_property(asset_id: str, property_name: str, session: Session, **_) -> str:
     try:
-        reading = asset_service.read_property(asset_id, property_name, session)
+        reading = await asset_service.read_property(asset_id, property_name, session)
         return json.dumps(
             {"asset_id": reading.asset_id, "property": reading.property_name, "value": reading.value, "unit": reading.unit, "connector_id": reading.connector_id},
             ensure_ascii=False,
@@ -74,7 +74,7 @@ async def _search_knowledge_base(query: str, session: Session, **_) -> str:
 
 async def _write_asset_property(asset_id: str, property_name: str, value: Any, session: Session, **_) -> str:
     try:
-        asset_service.write_property(asset_id, property_name, value, session)
+        await asset_service.write_property(asset_id, property_name, value, session)
         return f"Successfully wrote {value} to {property_name} of {asset_id}."
     except Exception as exc:
         logger.warning("tool_write_property_error", extra={"asset_id": asset_id, "property": property_name, "error": str(exc)}, exc_info=True)
