@@ -1,5 +1,5 @@
 import { apiFetch } from './backend';
-import type { ConnectorCreate, ConnectorResponse, DataResponse, DiscoveryResponse } from '@/lib/types/connector';
+import type { BatchReadResponse, ConnectorCreate, ConnectorResponse, DataResponse, DiscoveryResponse } from '@/lib/types/connector';
 
 export async function createConnector(data: ConnectorCreate): Promise<ConnectorResponse> {
   return apiFetch<ConnectorResponse>('/connectors', {
@@ -28,6 +28,19 @@ export async function readConnectorNode(
     {
       method: 'POST',
       body: JSON.stringify({ path, params: {} }),
+    },
+  );
+}
+
+export async function readConnectorBatch(
+  connectorId: string,
+  nodeIds: string[],
+): Promise<BatchReadResponse> {
+  return apiFetch<BatchReadResponse>(
+    `/connectors/${encodeURIComponent(connectorId)}/read-batch`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ node_ids: nodeIds }),
     },
   );
 }
