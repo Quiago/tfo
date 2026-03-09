@@ -1,12 +1,20 @@
 import asyncio
 import contextlib
+import multiprocessing
 import os
 from contextlib import asynccontextmanager
 
-# vLLM v1 spawns EngineCore as a subprocess. On Linux the default multiprocessing
-# start method is 'fork', which cannot re-initialize CUDA in the child process.
-# Setting this env var before any vLLM import forces vLLM to use 'spawn'.
-os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
+# ── vLLM multiprocessing fix ───────────────────────────────────────────────────
+# vLLM V1 (≥0.6) spawns EngineCore as a subprocess. On Linux the default
+# multiprocessing start method is 'fork', which fails when CUDA is already
+# initialized in the parent process ("Cannot re-initialize CUDA in forked
+# subprocess"). Setting spawn here and via env var ensures vLLM uses a fresh
+# process that can initialize CUDA from scratch.
+# Both must be set BEFORE any torch/vLLM import happens downstream.
+os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+if multiprocessing.get_start_method(allow_none=True) != "spawn":
+    multiprocessing.set_start_method("spawn", force=True)
+# ──────────────────────────────────────────────────────────────────────────────
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

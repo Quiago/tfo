@@ -404,8 +404,8 @@ const SensorLayer = memo(function SensorLayer({
     const ticks = useMemo(() => xTicks(xDomain), [xDomain]);
 
     return (
-        <div style={{ width: '100%', height }}>
-            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+        <div>
+            <ResponsiveContainer width="100%" height={height} minWidth={0}>
                 <ComposedChart
                     data={chartData}
                     margin={{ top: 5, right: 20, bottom: 0, left: 0 }}
@@ -482,8 +482,7 @@ const EnergyLayer = memo(function EnergyLayer({
     const ticks = useMemo(() => xTicks(xDomain), [xDomain]);
 
     return (
-        <div style={{ width: '100%', height }}>
-        <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+        <ResponsiveContainer width="100%" height={height} minWidth={0}>
             <ComposedChart data={data} margin={{ top: 5, right: 20, bottom: 0, left: 0 }}>
                 <ChartDefs />
                 <CartesianGrid strokeDasharray="2 4" stroke="#98A6D4" strokeOpacity={0.3} />
@@ -542,7 +541,6 @@ const EnergyLayer = memo(function EnergyLayer({
                 )}
             </ComposedChart>
         </ResponsiveContainer>
-        </div>
     );
 });
 
@@ -567,8 +565,7 @@ const ActionsLayer = memo(function ActionsLayer({
     const ticks = useMemo(() => xTicks(xDomain), [xDomain]);
 
     return (
-        <div style={{ width: '100%', height }}>
-        <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+        <ResponsiveContainer width="100%" height={height} minWidth={0}>
             <ScatterChart margin={{ top: 5, right: 20, bottom: 20, left: 0 }}>
                 <CartesianGrid strokeDasharray="2 4" stroke="#98A6D4" strokeOpacity={0.3} />
                 <XAxis
@@ -627,7 +624,6 @@ const ActionsLayer = memo(function ActionsLayer({
                 />
             </ScatterChart>
         </ResponsiveContainer>
-        </div>
     );
 });
 
@@ -653,8 +649,7 @@ const ProductLayer = memo(function ProductLayer({
     const ticks = useMemo(() => xTicks(xDomain), [xDomain]);
 
     return (
-        <div style={{ width: '100%', height }}>
-        <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+        <ResponsiveContainer width="100%" height={height} minWidth={0}>
             <ComposedChart data={data} margin={{ top: 5, right: 20, bottom: 0, left: 0 }}>
                 <ChartDefs />
                 <CartesianGrid strokeDasharray="2 4" stroke="#98A6D4" strokeOpacity={0.3} />
@@ -699,7 +694,6 @@ const ProductLayer = memo(function ProductLayer({
                 )}
             </ComposedChart>
         </ResponsiveContainer>
-        </div>
     );
 });
 

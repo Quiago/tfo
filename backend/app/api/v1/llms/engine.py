@@ -31,7 +31,14 @@ except ImportError:
 if _CUDA_AVAILABLE and not _VLLM_AVAILABLE:
     logger.warning("[Engine] CUDA detectada pero vLLM no está instalado. Usando transformers como fallback. Para habilitar vLLM: uv add vllm")
 
-logger.info("[Engine] Backend seleccionado: " + ("vLLM (GPU)" if _VLLM_AVAILABLE else "transformers (CPU)"))
+logger.info(
+    "[Engine] Diagnóstico al importar — CUDA=%s, vLLM=%s, multiproc_method=%s, VLLM_WORKER_MULTIPROC_METHOD=%s",
+    _CUDA_AVAILABLE,
+    _VLLM_AVAILABLE,
+    __import__("multiprocessing").get_start_method(allow_none=True),
+    __import__("os").environ.get("VLLM_WORKER_MULTIPROC_METHOD", "<no establecido>"),
+)
+logger.info("[Engine] Backend seleccionado: %s", "vLLM (GPU)" if (_VLLM_AVAILABLE and _CUDA_AVAILABLE) else "transformers (CPU)")
 
 
 class VLLMEngine:
@@ -48,6 +55,12 @@ class VLLMEngine:
 
     async def load(self, model_id: str, dtype: str = "float32") -> None:
         """Carga un modelo descargando el actual. Thread-safe via Lock."""
+        import multiprocessing as _mp
+        logger.info(
+            "[Engine] load() — model_id=%s dtype=%s CUDA=%s vLLM=%s multiproc=%s",
+            model_id, dtype, _CUDA_AVAILABLE, _VLLM_AVAILABLE,
+            _mp.get_start_method(allow_none=True),
+        )
         async with self._swap_lock:
             if self._current_model_id:
                 await self._unload()
@@ -61,6 +74,7 @@ class VLLMEngine:
                         "o proceso vLLM terminado inesperadamente. "
                         "Intentando fallback con transformers...",
                         exc,
+                        exc_info=True,
                     )
                     await self._load_transformers(model_id, dtype)
             else:
@@ -130,6 +144,11 @@ class VLLMEngine:
         Genera texto dado un historial en formato OpenAI messages.
         tools: schemas en formato OpenAI. Se pasa a apply_chat_template si el modelo lo soporta.
         """
+        logger.debug(
+            "[Engine] generate() — is_ready=%s backend=%s model=%s msgs=%d tools=%s",
+            self.is_ready, self.backend, self._current_model_id, len(messages),
+            len(tools) if tools else 0,
+        )
         if not self.is_ready:
             raise RuntimeError("No hay modelo cargado. Llama load() primero.")
         if _VLLM_AVAILABLE and self._vllm_engine:

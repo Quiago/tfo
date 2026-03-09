@@ -224,6 +224,7 @@ export function useConnectorTimeline(
                 console.log('[Connector] Discovery →', mappings.map((m) => `${m.field}=${m.nodeId}`));
             } catch (err) {
                 if (cancelled) return;
+                console.error('[Connector] discovery failed:', err);
                 const httpStatus = err instanceof ApiError ? err.status : null;
                 setStatus(httpStatus === 404 ? 'not_found' : 'error');
                 return;
@@ -265,8 +266,9 @@ export function useConnectorTimeline(
             let batchResult;
             try {
                 batchResult = await readConnectorBatch(connectorId, nodeIdsRef.current);
-            } catch {
+            } catch (err) {
                 consecutiveErrorsRef.current += 1;
+                console.warn(`[Connector] batch read failed (${consecutiveErrorsRef.current}/${MAX_CONSECUTIVE_ERRORS}):`, err);
                 if (consecutiveErrorsRef.current >= MAX_CONSECUTIVE_ERRORS) {
                     connectedRef.current = false;
                     setStatus('error');
@@ -280,7 +282,11 @@ export function useConnectorTimeline(
             for (const item of batchResult.results) {
                 const idx  = nodeIdsRef.current.indexOf(item.node_id);
                 const field = FIELD_MAP[idx];
-                if (!field || item.error) continue;
+                if (!field) continue;
+                if (item.error) {
+                    console.debug(`[Connector] node ${item.node_id} error: ${item.error}`);
+                    continue;
+                }
                 const val = extractNumeric(item.value);
                 if (val !== null) {
                     rawValues[field]          = val;
@@ -291,6 +297,7 @@ export function useConnectorTimeline(
 
             if (!anySuccess) {
                 consecutiveErrorsRef.current += 1;
+                console.warn(`[Connector] no numeric values from batch (${consecutiveErrorsRef.current}/${MAX_CONSECUTIVE_ERRORS}). Items:`, batchResult.results);
                 if (consecutiveErrorsRef.current >= MAX_CONSECUTIVE_ERRORS) {
                     connectedRef.current = false;
                     setStatus('error');

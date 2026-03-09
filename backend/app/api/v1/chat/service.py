@@ -138,13 +138,19 @@ async def send_message(conversation_id: str, user_id: int, content: str, max_new
 
 
 async def send_message_streaming(conversation_id: str, user_id: int, content: str, max_new_tokens: int, temperature: float, session: Session) -> AsyncGenerator[dict, None]:
+    logger.info(
+        "stream_start — conv=%s user=%s model_ready=%s model=%s",
+        conversation_id, user_id, engine.is_ready, engine.current_model_id,
+    )
     if not engine.is_ready:
+        logger.warning("stream_error — model not loaded")
         yield {"type": "error", "error": "No model loaded. Call POST /llms/load first."}
         return
 
     try:
         conv = get_conversation(conversation_id, user_id, session)
     except Exception as exc:
+        logger.warning("stream_error — conversation not found: %s", exc)
         yield {"type": "error", "error": str(exc)}
         return
 
@@ -161,7 +167,15 @@ async def send_message_streaming(conversation_id: str, user_id: int, content: st
     final_text = ""
 
     for iteration in range(_MAX_TOOL_ITERATIONS):
-        response = await engine.generate(context, max_new_tokens, temperature, tools=tools)
+        logger.info("stream_iter — conv=%s iter=%d ctx_msgs=%d", conversation_id, iteration, len(context))
+        try:
+            response = await engine.generate(context, max_new_tokens, temperature, tools=tools)
+        except Exception as exc:
+            logger.error("stream_generate_error — conv=%s iter=%d", conversation_id, iteration, exc_info=True)
+            yield {"type": "error", "error": f"Generation failed: {exc}"}
+            return
+        logger.info("stream_generate_ok — conv=%s iter=%d resp_len=%d", conversation_id, iteration, len(response))
+
         tool_name, tool_args = parse_tool_call(response)
 
         if not tool_name:
@@ -169,8 +183,13 @@ async def send_message_streaming(conversation_id: str, user_id: int, content: st
             break
 
         yield {"type": "tool_call", "name": tool_name, "arguments": tool_args}
+        logger.info("stream_tool_call — conv=%s tool=%s args=%s", conversation_id, tool_name, tool_args)
 
-        tool_result = await execute_tool(tool_name, tool_args, session)
+        try:
+            tool_result = await execute_tool(tool_name, tool_args, session)
+        except Exception as exc:
+            logger.error("stream_tool_error — conv=%s tool=%s", conversation_id, tool_name, exc_info=True)
+            tool_result = f"Tool error: {exc}"
         tool_calls_log.append({"name": tool_name, "arguments": tool_args, "result": tool_result})
 
         yield {
@@ -194,6 +213,7 @@ async def send_message_streaming(conversation_id: str, user_id: int, content: st
         yield {"type": "thinking", "content": thinking}
 
     words = final_text.split(" ")
+    logger.info("stream_tokens — conv=%s word_count=%d", conversation_id, len(words))
     for i, word in enumerate(words):
         chunk = word + (" " if i < len(words) - 1 else "")
         yield {"type": "token", "content": chunk}
@@ -202,6 +222,7 @@ async def send_message_streaming(conversation_id: str, user_id: int, content: st
     assistant_msg = _save_message(conv.id, "assistant", final_text, session, tool_calls=tool_calls_log or None)
     _touch_conversation(conv, session)
 
+    logger.info("stream_done — conv=%s msg=%s", conversation_id, assistant_msg.id)
     yield {"type": "done", "message_id": assistant_msg.id, "conversation_id": conv.id}
 
 
