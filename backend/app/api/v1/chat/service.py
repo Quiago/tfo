@@ -11,6 +11,7 @@ Flujo de inferencia (send_message):
   4. Guardar mensaje del assistant.
   5. Actualizar timestamp de la conversación.
 """
+import asyncio
 import json
 import logging
 import re

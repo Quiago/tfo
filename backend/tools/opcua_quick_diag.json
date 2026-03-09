@@ -1,0 +1,699 @@
+{
+  "endpoint": "opc.tcp://opcuaserver.com:48010",
+  "records": [
+    {
+      "poll": 1,
+      "t": 0.0,
+      "values": {
+        "ns=2;s=Demo.Dynamic.Scalar.Float": {
+          "type": "Float",
+          "value": 2669449.75
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Double": {
+          "type": "Double",
+          "value": 2693846.1001236313
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int32": {
+          "type": "Int32",
+          "value": 2448954.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int16": {
+          "type": "Int16",
+          "value": 24125.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.UInt32": {
+          "type": "UInt32",
+          "value": 2448960.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Boolean": {
+          "type": "Boolean",
+          "value": "True"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.String": {
+          "type": "String",
+          "value": "scissors - lizard - spock *** rock - paper - "
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Byte": {
+          "type": "Byte",
+          "value": 72.0
+        }
+      }
+    },
+    {
+      "poll": 2,
+      "t": 2.0,
+      "values": {
+        "ns=2;s=Demo.Dynamic.Scalar.Float": {
+          "type": "Float",
+          "value": 2669493.75
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Double": {
+          "type": "Double",
+          "value": 2693894.5001236354
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int32": {
+          "type": "Int32",
+          "value": 2448998.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int16": {
+          "type": "Int16",
+          "value": 24170.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.UInt32": {
+          "type": "UInt32",
+          "value": 2449005.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Boolean": {
+          "type": "Boolean",
+          "value": "False"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.String": {
+          "type": "String",
+          "value": "cissors - lizard - spock *** rock - paper - s"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Byte": {
+          "type": "Byte",
+          "value": 118.0
+        }
+      }
+    },
+    {
+      "poll": 3,
+      "t": 4.0,
+      "values": {
+        "ns=2;s=Demo.Dynamic.Scalar.Float": {
+          "type": "Float",
+          "value": 2669538.75
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Double": {
+          "type": "Double",
+          "value": 2693944.0001236396
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int32": {
+          "type": "Int32",
+          "value": 2449043.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int16": {
+          "type": "Int16",
+          "value": 24214.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.UInt32": {
+          "type": "UInt32",
+          "value": 2449049.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Boolean": {
+          "type": "Boolean",
+          "value": "False"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.String": {
+          "type": "String",
+          "value": " scissors - lizard - spock *** rock - paper -"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Byte": {
+          "type": "Byte",
+          "value": 161.0
+        }
+      }
+    },
+    {
+      "poll": 4,
+      "t": 6.0,
+      "values": {
+        "ns=2;s=Demo.Dynamic.Scalar.Float": {
+          "type": "Float",
+          "value": 2669581.75
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Double": {
+          "type": "Double",
+          "value": 2693991.3001236436
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int32": {
+          "type": "Int32",
+          "value": 2449086.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int16": {
+          "type": "Int16",
+          "value": 24257.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.UInt32": {
+          "type": "UInt32",
+          "value": 2449092.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Boolean": {
+          "type": "Boolean",
+          "value": "True"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.String": {
+          "type": "String",
+          "value": " - scissors - lizard - spock *** rock - paper"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Byte": {
+          "type": "Byte",
+          "value": 204.0
+        }
+      }
+    },
+    {
+      "poll": 5,
+      "t": 8.0,
+      "values": {
+        "ns=2;s=Demo.Dynamic.Scalar.Float": {
+          "type": "Float",
+          "value": 2669624.75
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Double": {
+          "type": "Double",
+          "value": 2694038.6001236476
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int32": {
+          "type": "Int32",
+          "value": 2449129.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int16": {
+          "type": "Int16",
+          "value": 24300.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.UInt32": {
+          "type": "UInt32",
+          "value": 2449134.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Boolean": {
+          "type": "Boolean",
+          "value": "True"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.String": {
+          "type": "String",
+          "value": "er - scissors - lizard - spock *** rock - pap"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Byte": {
+          "type": "Byte",
+          "value": 247.0
+        }
+      }
+    },
+    {
+      "poll": 6,
+      "t": 10.0,
+      "values": {
+        "ns=2;s=Demo.Dynamic.Scalar.Float": {
+          "type": "Float",
+          "value": 2669667.75
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Double": {
+          "type": "Double",
+          "value": 2694085.9001236516
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int32": {
+          "type": "Int32",
+          "value": 2449172.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int16": {
+          "type": "Int16",
+          "value": 24343.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.UInt32": {
+          "type": "UInt32",
+          "value": 2449178.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Boolean": {
+          "type": "Boolean",
+          "value": "True"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.String": {
+          "type": "String",
+          "value": "per - scissors - lizard - spock *** rock - pa"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Byte": {
+          "type": "Byte",
+          "value": 35.0
+        }
+      }
+    },
+    {
+      "poll": 7,
+      "t": 12.0,
+      "values": {
+        "ns=2;s=Demo.Dynamic.Scalar.Float": {
+          "type": "Float",
+          "value": 2669711.75
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Double": {
+          "type": "Double",
+          "value": 2694133.2001236556
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int32": {
+          "type": "Int32",
+          "value": 2449215.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int16": {
+          "type": "Int16",
+          "value": 24386.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.UInt32": {
+          "type": "UInt32",
+          "value": 2449221.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Boolean": {
+          "type": "Boolean",
+          "value": "True"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.String": {
+          "type": "String",
+          "value": " paper - scissors - lizard - spock *** rock -"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Byte": {
+          "type": "Byte",
+          "value": 77.0
+        }
+      }
+    },
+    {
+      "poll": 8,
+      "t": 14.0,
+      "values": {
+        "ns=2;s=Demo.Dynamic.Scalar.Float": {
+          "type": "Float",
+          "value": 2669752.75
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Double": {
+          "type": "Double",
+          "value": 2694179.4001236595
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int32": {
+          "type": "Int32",
+          "value": 2449257.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int16": {
+          "type": "Int16",
+          "value": 24428.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.UInt32": {
+          "type": "UInt32",
+          "value": 2449262.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Boolean": {
+          "type": "Boolean",
+          "value": "True"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.String": {
+          "type": "String",
+          "value": "k - paper - scissors - lizard - spock *** roc"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Byte": {
+          "type": "Byte",
+          "value": 119.0
+        }
+      }
+    },
+    {
+      "poll": 9,
+      "t": 16.0,
+      "values": {
+        "ns=2;s=Demo.Dynamic.Scalar.Float": {
+          "type": "Float",
+          "value": 2669794.75
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Double": {
+          "type": "Double",
+          "value": 2694225.6001236634
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int32": {
+          "type": "Int32",
+          "value": 2449298.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int16": {
+          "type": "Int16",
+          "value": 24469.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.UInt32": {
+          "type": "UInt32",
+          "value": 2449304.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Boolean": {
+          "type": "Boolean",
+          "value": "True"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.String": {
+          "type": "String",
+          "value": " rock - paper - scissors - lizard - spock ***"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Byte": {
+          "type": "Byte",
+          "value": 160.0
+        }
+      }
+    },
+    {
+      "poll": 10,
+      "t": 18.0,
+      "values": {
+        "ns=2;s=Demo.Dynamic.Scalar.Float": {
+          "type": "Float",
+          "value": 2669836.75
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Double": {
+          "type": "Double",
+          "value": 2694271.8001236673
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int32": {
+          "type": "Int32",
+          "value": 2449341.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int16": {
+          "type": "Int16",
+          "value": 24511.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.UInt32": {
+          "type": "UInt32",
+          "value": 2449346.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Boolean": {
+          "type": "Boolean",
+          "value": "True"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.String": {
+          "type": "String",
+          "value": "** rock - paper - scissors - lizard - spock *"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Byte": {
+          "type": "Byte",
+          "value": 202.0
+        }
+      }
+    },
+    {
+      "poll": 11,
+      "t": 20.0,
+      "values": {
+        "ns=2;s=Demo.Dynamic.Scalar.Float": {
+          "type": "Float",
+          "value": 2669880.75
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Double": {
+          "type": "Double",
+          "value": 2694321.3001236715
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int32": {
+          "type": "Int32",
+          "value": 2449386.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int16": {
+          "type": "Int16",
+          "value": 24556.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.UInt32": {
+          "type": "UInt32",
+          "value": 2449391.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Boolean": {
+          "type": "Boolean",
+          "value": "False"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.String": {
+          "type": "String",
+          "value": "** rock - paper - scissors - lizard - spock *"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Byte": {
+          "type": "Byte",
+          "value": 248.0
+        }
+      }
+    },
+    {
+      "poll": 12,
+      "t": 22.0,
+      "values": {
+        "ns=2;s=Demo.Dynamic.Scalar.Float": {
+          "type": "Float",
+          "value": 2669924.75
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Double": {
+          "type": "Double",
+          "value": 2694367.5001236754
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int32": {
+          "type": "Int32",
+          "value": 2449428.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int16": {
+          "type": "Int16",
+          "value": 24599.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.UInt32": {
+          "type": "UInt32",
+          "value": 2449434.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Boolean": {
+          "type": "Boolean",
+          "value": "True"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.String": {
+          "type": "String",
+          "value": "k *** rock - paper - scissors - lizard - spoc"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Byte": {
+          "type": "Byte",
+          "value": 34.0
+        }
+      }
+    },
+    {
+      "poll": 13,
+      "t": 24.0,
+      "values": {
+        "ns=2;s=Demo.Dynamic.Scalar.Float": {
+          "type": "Float",
+          "value": 2669967.75
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Double": {
+          "type": "Double",
+          "value": 2694415.9001236795
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int32": {
+          "type": "Int32",
+          "value": 2449471.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int16": {
+          "type": "Int16",
+          "value": 24642.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.UInt32": {
+          "type": "UInt32",
+          "value": 2449477.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Boolean": {
+          "type": "Boolean",
+          "value": "False"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.String": {
+          "type": "String",
+          "value": "ck *** rock - paper - scissors - lizard - spo"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Byte": {
+          "type": "Byte",
+          "value": 77.0
+        }
+      }
+    },
+    {
+      "poll": 14,
+      "t": 26.0,
+      "values": {
+        "ns=2;s=Demo.Dynamic.Scalar.Float": {
+          "type": "Float",
+          "value": 2670010.75
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Double": {
+          "type": "Double",
+          "value": 2694463.2001236835
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int32": {
+          "type": "Int32",
+          "value": 2449515.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int16": {
+          "type": "Int16",
+          "value": 24686.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.UInt32": {
+          "type": "UInt32",
+          "value": 2449521.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Boolean": {
+          "type": "Boolean",
+          "value": "True"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.String": {
+          "type": "String",
+          "value": "pock *** rock - paper - scissors - lizard - s"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Byte": {
+          "type": "Byte",
+          "value": 121.0
+        }
+      }
+    },
+    {
+      "poll": 15,
+      "t": 28.0,
+      "values": {
+        "ns=2;s=Demo.Dynamic.Scalar.Float": {
+          "type": "Float",
+          "value": 2670053.75
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Double": {
+          "type": "Double",
+          "value": 2694510.5001236876
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int32": {
+          "type": "Int32",
+          "value": 2449558.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Int16": {
+          "type": "Int16",
+          "value": 24729.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.UInt32": {
+          "type": "UInt32",
+          "value": 2449564.0
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Boolean": {
+          "type": "Boolean",
+          "value": "True"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.String": {
+          "type": "String",
+          "value": " spock *** rock - paper - scissors - lizard -"
+        },
+        "ns=2;s=Demo.Dynamic.Scalar.Byte": {
+          "type": "Byte",
+          "value": 164.0
+        }
+      }
+    }
+  ],
+  "stats": [
+    {
+      "node_id": "ns=2;s=Demo.Dynamic.Scalar.Float",
+      "type": "Float",
+      "min": 2669449.75,
+      "max": 2670053.75,
+      "spread": 604.0,
+      "unique": 15,
+      "useful": true,
+      "samples": 15
+    },
+    {
+      "node_id": "ns=2;s=Demo.Dynamic.Scalar.Double",
+      "type": "Double",
+      "min": 2693846.1001236313,
+      "max": 2694510.5001236876,
+      "spread": 664.4000000562519,
+      "unique": 15,
+      "useful": true,
+      "samples": 15
+    },
+    {
+      "node_id": "ns=2;s=Demo.Dynamic.Scalar.Int32",
+      "type": "Int32",
+      "min": 2448954.0,
+      "max": 2449558.0,
+      "spread": 604.0,
+      "unique": 15,
+      "useful": true,
+      "samples": 15
+    },
+    {
+      "node_id": "ns=2;s=Demo.Dynamic.Scalar.Int16",
+      "type": "Int16",
+      "min": 24125.0,
+      "max": 24729.0,
+      "spread": 604.0,
+      "unique": 15,
+      "useful": true,
+      "samples": 15
+    },
+    {
+      "node_id": "ns=2;s=Demo.Dynamic.Scalar.UInt32",
+      "type": "UInt32",
+      "min": 2448960.0,
+      "max": 2449564.0,
+      "spread": 604.0,
+      "unique": 15,
+      "useful": true,
+      "samples": 15
+    },
+    {
+      "node_id": "ns=2;s=Demo.Dynamic.Scalar.Byte",
+      "type": "Byte",
+      "min": 34.0,
+      "max": 248.0,
+      "spread": 214.0,
+      "unique": 14,
+      "useful": true,
+      "samples": 15
+    }
+  ],
+  "recommended": [
+    {
+      "node_id": "ns=2;s=Demo.Dynamic.Scalar.Double",
+      "type": "Double",
+      "min": 2693846.1001236313,
+      "max": 2694510.5001236876,
+      "spread": 664.4000000562519,
+      "unique": 15,
+      "useful": true,
+      "samples": 15
+    },
+    {
+      "node_id": "ns=2;s=Demo.Dynamic.Scalar.Float",
+      "type": "Float",
+      "min": 2669449.75,
+      "max": 2670053.75,
+      "spread": 604.0,
+      "unique": 15,
+      "useful": true,
+      "samples": 15
+    },
+    {
+      "node_id": "ns=2;s=Demo.Dynamic.Scalar.Int32",
+      "type": "Int32",
+      "min": 2448954.0,
+      "max": 2449558.0,
+      "spread": 604.0,
+      "unique": 15,
+      "useful": true,
+      "samples": 15
+    },
+    {
+      "node_id": "ns=2;s=Demo.Dynamic.Scalar.Int16",
+      "type": "Int16",
+      "min": 24125.0,
+      "max": 24729.0,
+      "spread": 604.0,
+      "unique": 15,
+      "useful": true,
+      "samples": 15
+    },
+    {
+      "node_id": "ns=2;s=Demo.Dynamic.Scalar.UInt32",
+      "type": "UInt32",
+      "min": 2448960.0,
+      "max": 2449564.0,
+      "spread": 604.0,
+      "unique": 15,
+      "useful": true,
+      "samples": 15
+    },
+    {
+      "node_id": "ns=2;s=Demo.Dynamic.Scalar.Byte",
+      "type": "Byte",
+      "min": 34.0,
+      "max": 248.0,
+      "spread": 214.0,
+      "unique": 14,
+      "useful": true,
+      "samples": 15
+    }
+  ]
+}
