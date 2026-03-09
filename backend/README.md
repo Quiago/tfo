@@ -32,3 +32,5 @@ Database:
 Pytest for testing
 
 uv for package management
+
+test opc server: opc.tcp://opcuaserver.com:48010

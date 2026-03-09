@@ -185,6 +185,35 @@ class OPCUAConnector(ConnectorBackend):
             else:
                 await node.write_value(value)
 
+    async def read_batch(self, node_ids: list[str]) -> list[dict]:
+        """
+        Lee múltiples nodos en UNA SOLA sesión OPC-UA.
+
+        Reemplaza N llamadas individuales a read() (cada una abre su propia
+        sesión TCP) por una sola sesión que lee todos los nodos en secuencia.
+        Reduce latencia de O(N × RTT) a O(RTT + N × read_time).
+
+        Devuelve una lista con un dict por node_id:
+          éxito: { node_id, value, data_type, status, source_timestamp }
+          error:  { node_id, error }
+        """
+        results: list[dict] = []
+        async with _make_client(self.connector.endpoint, self._cfg) as client:
+            for node_id in node_ids:
+                try:
+                    node = client.get_node(node_id)
+                    dv: DataValue = await node.read_data_value()
+                    results.append({
+                        "node_id": node_id,
+                        "value": _to_json_safe(dv.Value.Value if dv.Value else None),
+                        "data_type": dv.Value.VariantType.name if dv.Value else None,
+                        "status": str(dv.StatusCode),
+                        "source_timestamp": dv.SourceTimestamp.isoformat() if dv.SourceTimestamp else None,
+                    })
+                except Exception as exc:
+                    results.append({"node_id": node_id, "error": str(exc)})
+        return results
+
     async def discover(self) -> DiscoveryResult:
         """
         Navega el árbol de nodos OPC-UA recursivamente y devuelve todos los
@@ -194,10 +223,18 @@ class OPCUAConnector(ConnectorBackend):
         Variables no se recursan — sus hijos son metadatos, no datos de proceso.
 
         Configurable via backend_config:
-          discovery_timeout_s  — timeout global en segundos (default: 60)
-          discovery_max_nodes  — máximo de nodos Variable a recolectar (default: 500)
-          discovery_max_depth  — profundidad máxima de recursión (default: 8)
+          preferred_node_ids   list[str]  Si está presente, salta el tree-walk y
+                                          devuelve solo esos nodos directamente.
+                                          Ideal para producción donde el operador
+                                          sabe qué tags monitorizar.
+          discovery_timeout_s  int        Timeout global en segundos (default: 60)
+          discovery_max_nodes  int        Máximo de nodos a recolectar (default: 500)
+          discovery_max_depth  int        Profundidad máxima de recursión (default: 8)
         """
+        preferred = self._cfg.get("preferred_node_ids", [])
+        if preferred:
+            return await self._discover_preferred(preferred)
+
         timeout_s = self._cfg.get("discovery_timeout_s", 60)
         max_nodes = self._cfg.get("discovery_max_nodes", 500)
         max_depth = self._cfg.get("discovery_max_depth", 8)
@@ -222,6 +259,49 @@ class OPCUAConnector(ConnectorBackend):
 
         logger.info(
             "OPC-UA discovery complete",
+            extra={"connector_id": self.connector.id, "node_count": len(nodes)},
+        )
+        return DiscoveryResult(
+            connector_id=self.connector.id,
+            node_count=len(nodes),
+            nodes=nodes,
+        )
+
+    async def _discover_preferred(self, node_ids: list[str]) -> DiscoveryResult:
+        """
+        Fast path: construye un DiscoveryResult a partir de node_ids explícitos.
+
+        Abre UNA sesión OPC-UA, lee DisplayName + VariantType de cada nodo,
+        y devuelve la lista. Sin tree-walk — latencia O(N reads) en lugar de
+        O(miles de browses).
+        """
+        nodes: list[NodeInfo] = []
+        async with _make_client(self.connector.endpoint, self._cfg) as client:
+            for node_id in node_ids:
+                try:
+                    node = client.get_node(node_id)
+                    attrs = await node.read_attributes([AttributeIds.DisplayName, AttributeIds.NodeClass])
+                    raw_name = attrs[0].Value.Value if attrs[0].Value else None
+                    name = (raw_name.Text if hasattr(raw_name, "Text") else str(raw_name)) if raw_name else node_id
+                    try:
+                        dv: DataValue = await node.read_data_value()
+                        vt = dv.Value.VariantType.name if dv.Value else "Unknown"
+                    except Exception:
+                        vt = "Unknown"
+                    nodes.append(NodeInfo(
+                        node_id=node_id,
+                        display_name=name,
+                        path=[name],
+                        data_type=vt,
+                        writable=False,
+                    ))
+                except Exception as exc:
+                    logger.debug(
+                        "preferred node unreadable",
+                        extra={"node_id": node_id, "error": str(exc)},
+                    )
+        logger.info(
+            "OPC-UA discovery (preferred nodes)",
             extra={"connector_id": self.connector.id, "node_count": len(nodes)},
         )
         return DiscoveryResult(

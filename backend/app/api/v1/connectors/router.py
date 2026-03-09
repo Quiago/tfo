@@ -25,6 +25,9 @@ from app.api.v1.assets.schemas import ImportAssetsResponse
 from app.api.v1.auth.dependencies import get_current_user
 from app.api.v1.connectors import service
 from app.api.v1.connectors.schemas import (
+    BatchReadRequest,
+    BatchReadResponse,
+    BatchReadItem,
     ConnectorCreate,
     ConnectorHealthResponse,
     ConnectorResponse,
@@ -159,6 +162,26 @@ async def read_connector(
     """
     data = await service.read(connector_id, body.path, session, **body.params)
     return DataResponse(connector_id=connector_id, path=body.path, data=data)
+
+
+@router.post("/{connector_id}/read-batch", response_model=BatchReadResponse)
+async def read_connector_batch(
+    connector_id: str,
+    body: BatchReadRequest,
+    session: Session = Depends(get_session),
+):
+    """
+    Lee múltiples nodos en una sola sesión OPC-UA.
+
+    Usar en lugar de N llamadas individuales a /read para polling periódico.
+    Una sola conexión TCP para todos los nodos → latencia O(RTT) en vez de O(N × RTT).
+    Solo implementado para conectores OPC-UA.
+    """
+    results = await service.read_batch(connector_id, body.node_ids, session)
+    return BatchReadResponse(
+        connector_id=connector_id,
+        results=[BatchReadItem(**r) for r in results],
+    )
 
 
 @router.post("/{connector_id}/write", status_code=status.HTTP_204_NO_CONTENT)

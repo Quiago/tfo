@@ -29,7 +29,6 @@ import {
     CartesianGrid,
     ComposedChart,
     Line,
-    ReferenceLine,
     ResponsiveContainer,
     Scatter,
     ScatterChart,
@@ -371,180 +370,77 @@ function VideoFrameStrip({ data }: { data: SensorReading[] }) {
 // ─── LAYER COMPONENTS ───────────────────────────────────────────────────────
 function SensorLayer({
     data,
+    xDomain,
     granularity,
     expanded,
-    predictionStart,
     visibleSensors,
 }: {
     data: SensorReading[];
+    xDomain: [number, number];
     granularity: TimeGranularity;
     expanded: boolean;
-    predictionStart: number;
     visibleSensors: Record<string, boolean>;
 }) {
     const height = expanded ? 300 : 100;
-    const safePredictionStart = Math.min(predictionStart, data.length);
-    const yDomain: [number, number] = [0, 100];
 
-    // 1. AÑADIMOS 'anomaly_y' DENTRO DE LA DATA PRINCIPAL
-    const historicalData = useMemo(() => {
-        return data.slice(0, safePredictionStart).map(sensor => ({
-            ...sensor,
-            vibration_norm: normalizeForDisplay(sensor.vibration, 'vibration'),
-            temperature_norm: normalizeForDisplay(sensor.temperature, 'temperature'),
-            pressure_norm: normalizeForDisplay(sensor.pressure, 'pressure'),
-            humidity_norm: normalizeForDisplay(sensor.humidity, 'humidity'),
-            // Si es anomalía, guardamos el valor normalizado. Si no, null (Recharts ignora nulls)
-            anomaly_y: sensor.anomaly ? normalizeForDisplay(sensor.vibration, 'vibration') : null
-        }));
-    }, [data, safePredictionStart]);
-
-    const forecastData = useMemo(() => {
-        return data.slice(safePredictionStart).map(sensor => ({
-            ...sensor,
-            vibration_norm: normalizeForDisplay(sensor.vibration, 'vibration'),
-            temperature_norm: normalizeForDisplay(sensor.temperature, 'temperature'),
-            pressure_norm: normalizeForDisplay(sensor.pressure, 'pressure'),
-            humidity_norm: normalizeForDisplay(sensor.humidity, 'humidity'),
-            // Lo mismo para el futuro
-            anomaly_y: sensor.anomaly ? normalizeForDisplay(sensor.vibration, 'vibration') : null
-        }));
-    }, [data, safePredictionStart]);
+    // data values are already normalized 0–100 by the hook (windowNormalize).
+    // anomaly_y is only non-null when anomaly===true (manual TEST ANOMALY button).
+    const chartData = useMemo(() => data.map((s) => ({
+        ...s,
+        anomaly_y: s.anomaly ? s.vibration : null,
+    })), [data]);
 
     return (
         <div>
-            <div className="flex w-full">
-                {/* Historical Chart */}
-                <div className="w-[80%]">
-                    <ResponsiveContainer width="100%" height={height} minWidth={0}>
-                        <ComposedChart
-                            data={historicalData}
-                            margin={{ top: 5, right: 0, bottom: 0, left: 0 }}
-                        >
-                            <ChartDefs />
-                            <CartesianGrid strokeDasharray="2 4" stroke="#98A6D4" strokeOpacity={0.3} />
-                            <XAxis
-                                dataKey="timestamp"
-                                tickFormatter={(v) => formatTimestamp(v, granularity)}
-                                tick={{ fontSize: 9, fill: '#FFFFFF' }}
-                                axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
-                                tickLine={false}
-                            />
-                            <YAxis
-                                tick={{ fontSize: 9, fill: '#FFFFFF' }}
-                                axisLine={false}
-                                tickLine={false}
-                                domain={yDomain}
-                                width={COMMON_Y_AXIS_WIDTH}
-                                label={{ value: 'Norm', angle: -90, position: 'insideLeft', offset: -5, fontSize: 8, fill: '#98A6D4' }}
-                            />
-                            <Tooltip content={<SensorTooltip />} wrapperStyle={{ zIndex: 50 }} />
+            <ResponsiveContainer width="100%" height={height} minWidth={0}>
+                <ComposedChart
+                    data={chartData}
+                    margin={{ top: 5, right: 20, bottom: 0, left: 0 }}
+                >
+                    <ChartDefs />
+                    <CartesianGrid strokeDasharray="2 4" stroke="#98A6D4" strokeOpacity={0.3} />
+                    <XAxis
+                        dataKey="timestamp"
+                        type="number"
+                        scale="time"
+                        domain={xDomain}
+                        tickFormatter={(v) => formatTimestamp(v, granularity)}
+                        tick={{ fontSize: 9, fill: '#FFFFFF' }}
+                        axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
+                        tickLine={false}
+                    />
+                    <YAxis
+                        tick={{ fontSize: 9, fill: '#FFFFFF' }}
+                        axisLine={false}
+                        tickLine={false}
+                        domain={[0, 100]}
+                        width={COMMON_Y_AXIS_WIDTH}
+                        tickFormatter={(v: number) => `${v}%`}
+                    />
+                    <Tooltip content={<SensorTooltip />} wrapperStyle={{ zIndex: 50 }} />
 
-                            {/* Reference Lines */}
-                            {expanded && (
-                                <>
-                                    <ReferenceLine
-                                        y={normalizeForDisplay(8, 'vibration')}
-                                        stroke="#f59e0b"
-                                        strokeDasharray="6 3"
-                                        strokeWidth={1}
-                                        label={{ value: 'Vib Warning', position: 'right', fontSize: 8, fill: '#f59e0b' }}
-                                    />
-                                    <ReferenceLine
-                                        y={normalizeForDisplay(12, 'vibration')}
-                                        stroke="#ef4444"
-                                        strokeDasharray="6 3"
-                                        strokeWidth={1}
-                                        label={{ value: 'Vib Critical', position: 'right', fontSize: 8, fill: '#ef4444' }}
-                                    />
-                                </>
-                            )}
+                    {visibleSensors.pressure    && <Area isAnimationActive={false} type="monotone" dataKey="pressure"    stroke="#A9FFB5" strokeWidth={2} fill="url(#gradient-pressure)"    dot={false} />}
+                    {visibleSensors.temperature && <Area isAnimationActive={false} type="monotone" dataKey="temperature" stroke="#FFCEBD" strokeWidth={2} fill="url(#gradient-temperature)" dot={false} />}
+                    {visibleSensors.vibration   && <Area isAnimationActive={false} type="monotone" dataKey="vibration"   stroke="#F7E2FF" strokeWidth={2} fill="url(#gradient-vibration)"   dot={false} />}
+                    {visibleSensors.humidity    && <Area isAnimationActive={false} type="monotone" dataKey="humidity"    stroke="#7BC3FF" strokeWidth={2} fill="url(#gradient-humidity)"    dot={false} />}
 
-                            {/* Lines / Areas */}
-                            {visibleSensors.pressure && <Area type="monotone" dataKey="pressure_norm" stroke="#A9FFB5" strokeWidth={3} fill="url(#gradient-pressure)" />}
-                            {visibleSensors.temperature && <Area type="monotone" dataKey="temperature_norm" stroke="#FFCEBD" strokeWidth={3} fill="url(#gradient-temperature)" />}
-                            {visibleSensors.vibration && <Area type="monotone" dataKey="vibration_norm" stroke="#F7E2FF" strokeWidth={3} fill="url(#gradient-vibration)" />}
-                            {visibleSensors.humidity && <Area type="monotone" dataKey="humidity_norm" stroke="#7BC3FF" strokeWidth={3} fill="url(#gradient-humidity)" />}
-
-                            {/* SCATTER */}
-                            <Scatter
-                                dataKey="anomaly_y"
-                                fill="#f59e0b"
-                                isAnimationActive={false}
-                                shape={(props: any) => {
-                                    if (props.payload.anomaly_y === null) return null;
-                                    return (
-                                        <circle
-                                            cx={props.cx}
-                                            cy={props.cy}
-                                            r={6}
-                                            fill={props.payload.alertLevel === 'critical' ? '#ef4444' : '#f59e0b'}
-                                            stroke="#18181b"
-                                            strokeWidth={2}
-                                        />
-                                    );
-                                }}
-                            />
-                        </ComposedChart>
-                    </ResponsiveContainer>
-                </div>
-
-                {/* Separator */}
-                <div className="w-[2px] bg-[#98A6D4] relative opacity-30">
-                    <div className="absolute inset-0 border-l-2 border-dashed border-[#98A6D4]" />
-                    <div className="absolute top-0 left-1/2 -translate-x-1/2 bg-[#98A6D4] text-[#171921] text-[8px] px-1 py-0.5 rounded font-bold whitespace-nowrap">
-                        NOW
-                    </div>
-                </div>
-
-                {/* Forecast Chart */}
-                <div className="w-[20%]">
-                    <ResponsiveContainer width="100%" height={height} minWidth={0}>
-                        <ComposedChart
-                            data={forecastData}
-                            margin={{ top: 5, right: 20, bottom: 0, left: 0 }}
-                        >
-                            <ChartDefs />
-                            <CartesianGrid strokeDasharray="2 4" stroke="#98A6D4" strokeOpacity={0.3} />
-                            <XAxis
-                                dataKey="timestamp"
-                                tickFormatter={(v) => formatTimestamp(v, granularity)}
-                                tick={{ fontSize: 9, fill: '#FFFFFF' }}
-                                axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
-                                tickLine={false}
-                            />
-                            <YAxis tick={false} axisLine={false} tickLine={false} domain={yDomain} width={0} />
-                            <Tooltip content={<SensorTooltip />} wrapperStyle={{ zIndex: 50 }} />
-
-                            {/* Using Areas for forecast too, but maybe with dashed stroke if supported or less opacity */}
-                            {visibleSensors.pressure && <Area type="monotone" dataKey="pressure_norm" stroke="#A9FFB5" strokeWidth={2} strokeDasharray="4 4" fill="url(#gradient-pressure)" fillOpacity={0.5} />}
-                            {visibleSensors.temperature && <Area type="monotone" dataKey="temperature_norm" stroke="#FFCEBD" strokeWidth={2} strokeDasharray="4 4" fill="url(#gradient-temperature)" fillOpacity={0.5} />}
-                            {visibleSensors.vibration && <Area type="monotone" dataKey="vibration_norm" stroke="#F7E2FF" strokeWidth={2} strokeDasharray="4 4" fill="url(#gradient-vibration)" fillOpacity={0.5} />}
-                            {visibleSensors.humidity && <Area type="monotone" dataKey="humidity_norm" stroke="#7BC3FF" strokeWidth={2} strokeDasharray="4 4" fill="url(#gradient-humidity)" fillOpacity={0.5} />}
-
-                            <Scatter
-                                dataKey="anomaly_y"
-                                fill="#f59e0b"
-                                isAnimationActive={false}
-                                shape={(props: any) => {
-                                    if (props.payload.anomaly_y === null) return null;
-                                    return (
-                                        <circle
-                                            cx={props.cx}
-                                            cy={props.cy}
-                                            r={5}
-                                            fill={props.payload.alertLevel === 'critical' ? '#ef4444' : '#f59e0b'}
-                                            stroke="#18181b"
-                                            strokeWidth={1}
-                                            opacity={0.7}
-                                        />
-                                    );
-                                }}
-                            />
-                        </ComposedChart>
-                    </ResponsiveContainer>
-                </div>
-            </div>
+                    {/* Anomaly markers — only appear when triggerAnomaly() is called */}
+                    <Scatter
+                        dataKey="anomaly_y"
+                        isAnimationActive={false}
+                        shape={(props: any) => {
+                            if (props.payload.anomaly_y === null) return <g />;
+                            return (
+                                <circle
+                                    cx={props.cx} cy={props.cy} r={7}
+                                    fill={props.payload.alertLevel === 'critical' ? '#ef4444' : '#f59e0b'}
+                                    stroke="#18181b" strokeWidth={2}
+                                />
+                            );
+                        }}
+                    />
+                </ComposedChart>
+            </ResponsiveContainer>
             {visibleSensors.camera && <VideoFrameStrip data={data} />}
         </div>
     );
@@ -552,449 +448,229 @@ function SensorLayer({
 
 function EnergyLayer({
     data,
+    xDomain,
     granularity,
     expanded,
-    predictionStart,
 }: {
     data: EnergyReading[];
+    xDomain: [number, number];
     granularity: TimeGranularity;
     expanded: boolean;
-    predictionStart: number;
 }) {
     const height = expanded ? 300 : 100;
 
-    // Guard: during granularity transition, predictionStart may exceed data.length
-    const safePredictionStart = Math.min(predictionStart, data.length);
-
-    // Split data into historical and forecast
-    const historicalData = useMemo(() => data.slice(0, safePredictionStart), [data, safePredictionStart]);
-    const forecastData = useMemo(() => data.slice(safePredictionStart), [data, safePredictionStart]);
-
-    // Calculate shared Y-axis domain
-    const yDomain = useMemo(() => {
+    const yDomain = useMemo((): [number, number] => {
         if (data.length === 0) return [0, 200];
-        const maxVal = Math.max(...data.map(d => d.powerDraw));
-        return [0, Math.ceil(maxVal * 1.2)];
+        const max = Math.max(...data.map((d) => d.powerDraw));
+        return [0, Math.ceil(max * 1.2)];
     }, [data]);
 
     return (
-        <div className="flex w-full">
-            {/* Historical Chart - 80% */}
-            <div className="w-[80%]">
-                <ResponsiveContainer width="100%" height={height} minWidth={0}>
-                    <ComposedChart
-                        data={historicalData}
-                        margin={{ top: 5, right: 0, bottom: 0, left: 0 }}
-                    >
-                        <CartesianGrid strokeDasharray="2 4" stroke="#98A6D4" strokeOpacity={0.3} />
-                        <XAxis
-                            dataKey="timestamp"
-                            tickFormatter={(v) => formatTimestamp(v, granularity)}
-                            tick={{ fontSize: 9, fill: '#FFFFFF' }}
-                            axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
-                            tickLine={false}
-                        />
-                        <YAxis
-                            tick={{ fontSize: 9, fill: '#FFFFFF' }}
-                            axisLine={false}
-                            tickLine={false}
-                            width={COMMON_Y_AXIS_WIDTH}
-                            domain={yDomain}
-                        />
-                        <Tooltip content={<EnergyTooltip />} wrapperStyle={{ zIndex: 50 }} />
-                        <ChartDefs />
-                        {/* Power - Area with Neon Gradient */}
-                        <Area
-                            type="monotone"
-                            dataKey="powerDraw"
-                            stroke="#fbbf24"
-                            strokeWidth={2}
-                            fill="url(#gradient-power)"
-                            activeDot={{ r: 4, fill: '#fbbf24', stroke: '#fff', strokeWidth: 2 }}
-                        />
-                        {/* Cooling - Area with Neon Gradient (expanded only) */}
-                        {expanded && (
-                            <Area
-                                type="monotone"
-                                dataKey="coolingLoad"
-                                stroke="#fb923c"
-                                strokeWidth={2}
-                                strokeDasharray="3 3"
-                                fill="url(#gradient-cooling)"
-                            />
-                        )}
-                    </ComposedChart>
-                </ResponsiveContainer>
-            </div>
-
-            {/* Dashed separator */}
-            <div className="w-[2px] bg-[#98A6D4] relative opacity-30">
-                <div className="absolute inset-0 border-l-2 border-dashed border-[#98A6D4]" />
-                <div className="absolute top-0 left-1/2 -translate-x-1/2 bg-[#98A6D4] text-[#171921] text-[8px] px-1 py-0.5 rounded font-bold whitespace-nowrap">
-                    NOW
-                </div>
-            </div>
-
-            {/* Forecast Chart - 20% */}
-            <div className="w-[20%]">
-                <ResponsiveContainer width="100%" height={height} minWidth={0}>
-                    <ComposedChart
-                        data={forecastData}
-                        margin={{ top: 5, right: 20, bottom: 0, left: 0 }}
-                    >
-                        <CartesianGrid strokeDasharray="2 4" stroke="#98A6D4" strokeOpacity={0.3} />
-                        <XAxis
-                            dataKey="timestamp"
-                            tickFormatter={(v) => formatTimestamp(v, granularity)}
-                            tick={{ fontSize: 9, fill: '#FFFFFF' }}
-                            axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
-                            tickLine={false}
-                        />
-                        {/* Hidden Y-axis with same domain */}
-                        <YAxis tick={false} axisLine={false} tickLine={false} width={0} domain={yDomain} />
-                        <Tooltip content={<EnergyTooltip />} wrapperStyle={{ zIndex: 50 }} />
-
-                        <ChartDefs />
-                        {/* Confidence bands */}
-                        <Area type="monotone" dataKey="upperBound" stroke="none" fill="#3b82f610" />
-                        <Area type="monotone" dataKey="lowerBound" stroke="none" fill="#f3f4f610" />
-
-                        {/* Predicted Power - Area with lower opacity */}
-                        <Area
-                            type="monotone"
-                            dataKey="predicted"
-                            stroke="#818cf8"
-                            strokeWidth={2}
-                            strokeDasharray="4 4"
-                            fill="url(#gradient-power)"
-                            fillOpacity={0.5}
-                        />
-                        {/* Cooling load - dashed (expanded only) */}
-                        {expanded && (
-                            <Area
-                                type="monotone"
-                                dataKey="coolingLoad"
-                                stroke="#fb923c"
-                                strokeWidth={2}
-                                strokeDasharray="4 4"
-                                fill="url(#gradient-cooling)"
-                                fillOpacity={0.5}
-                            />
-                        )}
-                    </ComposedChart>
-                </ResponsiveContainer>
-            </div>
-        </div>
+        <ResponsiveContainer width="100%" height={height} minWidth={0}>
+            <ComposedChart data={data} margin={{ top: 5, right: 20, bottom: 0, left: 0 }}>
+                <ChartDefs />
+                <CartesianGrid strokeDasharray="2 4" stroke="#98A6D4" strokeOpacity={0.3} />
+                <XAxis
+                    dataKey="timestamp"
+                    type="number"
+                    scale="time"
+                    domain={xDomain}
+                    tickFormatter={(v) => formatTimestamp(v, granularity)}
+                    tick={{ fontSize: 9, fill: '#FFFFFF' }}
+                    axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
+                    tickLine={false}
+                />
+                <YAxis
+                    tick={{ fontSize: 9, fill: '#FFFFFF' }}
+                    axisLine={false}
+                    tickLine={false}
+                    width={COMMON_Y_AXIS_WIDTH}
+                    domain={yDomain}
+                />
+                <Tooltip content={<EnergyTooltip />} wrapperStyle={{ zIndex: 50 }} />
+                <Area
+                    isAnimationActive={false}
+                    type="monotone"
+                    dataKey="powerDraw"
+                    stroke="#fbbf24"
+                    strokeWidth={2}
+                    fill="url(#gradient-power)"
+                    dot={false}
+                    activeDot={{ r: 4, fill: '#fbbf24', stroke: '#fff', strokeWidth: 2 }}
+                />
+                {expanded && (
+                    <Area
+                        isAnimationActive={false}
+                        type="monotone"
+                        dataKey="coolingLoad"
+                        stroke="#fb923c"
+                        strokeWidth={2}
+                        strokeDasharray="3 3"
+                        fill="url(#gradient-cooling)"
+                        dot={false}
+                    />
+                )}
+                {expanded && (
+                    <Line
+                        isAnimationActive={false}
+                        type="monotone"
+                        dataKey="efficiency"
+                        stroke="#4ade80"
+                        strokeWidth={1}
+                        dot={false}
+                        strokeDasharray="2 2"
+                        yAxisId={0}
+                    />
+                )}
+            </ComposedChart>
+        </ResponsiveContainer>
     );
 }
 
 function ActionsLayer({
     data,
+    xDomain,
     granularity,
     expanded,
-    forecastBoundaryTimestamp,
-    lastTimestamp,
-    firstTimestamp,
 }: {
     data: ActionEvent[];
+    xDomain: [number, number];
     granularity: TimeGranularity;
     expanded: boolean;
-    forecastBoundaryTimestamp: number;
-    lastTimestamp: number;
-    firstTimestamp: number;
 }) {
-    const height = expanded ? 300 : 160; // Increased collapsed height from 120 to 160
+    const height = expanded ? 300 : 160;
 
-    // BUG #4 FIX: Use forecastBoundaryTimestamp from hook instead of data.length * 0.8
-    const historicalData = useMemo(() =>
-        data.filter(a => a.timestamp < forecastBoundaryTimestamp).map((a) => ({
-            ...a,
-            categoryY: categoryToY[a.category] ?? 0,
-        })),
-        [data, forecastBoundaryTimestamp]
-    );
-
-    const forecastData = useMemo(() =>
-        data.filter(a => a.timestamp >= forecastBoundaryTimestamp).map((a) => ({
-            ...a,
-            categoryY: categoryToY[a.category] ?? 0,
-        })),
-        [data, forecastBoundaryTimestamp]
+    const chartData = useMemo(() =>
+        data.map((a) => ({ ...a, categoryY: categoryToY[a.category] ?? 0 })),
+        [data]
     );
 
     return (
-        <div className="flex w-full bg-[#171921]">
-            {/* Historical Scatter - 80% */}
-            <div className="w-[80%]">
-                <ResponsiveContainer width="100%" height={height} minWidth={0}>
-                    <ScatterChart
-                        margin={{ top: 5, right: 0, bottom: 20, left: 0 }}
-                        syncId="actions-layer"
-                    >
-                        <CartesianGrid strokeDasharray="2 4" stroke="#98A6D4" strokeOpacity={0.3} />
-                        <XAxis
-                            dataKey="timestamp"
-                            type="number"
-                            domain={[firstTimestamp, forecastBoundaryTimestamp]}
-                            tickFormatter={(v) => formatTimestamp(v, granularity)}
-                            tick={{ fontSize: 9, fill: '#FFFFFF' }}
-                            axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
-                            tickLine={false}
-                        />
-                        <YAxis
-                            type="number"
-                            dataKey="categoryY"
-                            domain={[-1, 6]} // Add padding for top/bottom
-                            ticks={[0, 1, 2, 3, 4, 5]}
-                            tickFormatter={(v: number) => ACTION_CATEGORIES[v] ?? ''}
-                            tick={{ fontSize: 8, fill: '#FFFFFF' }}
-                            axisLine={false}
-                            tickLine={false}
-                            width={COMMON_Y_AXIS_WIDTH}
-                        />
-                        <Tooltip content={<ActionTooltip />} wrapperStyle={{ zIndex: 50 }} />
-                        <ChartDefs />
-                        <Scatter
-                            data={historicalData}
-                            dataKey="categoryY"
-                            shape={(props: any) => {
-                                const event = props.payload as ActionEvent & { categoryY: number };
-                                const color = event.isAI ? '#6366f1' : '#a855f7'; // AI: Indigo, Human: Purple
-                                if (event.isAI) {
-                                    return (
-                                        <polygon
-                                            points={`${props.cx},${props.cy - 6} ${props.cx + 6},${props.cy} ${props.cx},${props.cy + 6} ${props.cx - 6},${props.cy}`}
-                                            fill={color}
-                                            stroke="#fff"
-                                            strokeWidth={1}
-                                            filter="url(#neon-glow)"
-                                        />
-                                    );
-                                }
-                                return (
-                                    <circle
-                                        cx={props.cx}
-                                        cy={props.cy}
-                                        r={6}
-                                        fill={color}
-                                        stroke="#fff"
-                                        strokeWidth={1}
-                                        filter="url(#neon-glow)"
-                                    />
-                                );
-                            }}
-                        />
-                    </ScatterChart>
-                </ResponsiveContainer>
-            </div>
-
-            {/* Dashed separator */}
-            <div className="w-[2px] bg-[#98A6D4] relative opacity-30">
-                <div className="absolute inset-0 border-l-2 border-dashed border-[#98A6D4]" />
-                <div className="absolute top-0 left-1/2 -translate-x-1/2 bg-[#98A6D4] text-[#171921] text-[8px] px-1 py-0.5 rounded font-bold whitespace-nowrap">
-                    NOW
-                </div>
-            </div>
-
-            {/* Forecast Scatter - 20% */}
-            <div className="w-[20%]">
-                <ResponsiveContainer width="100%" height={height} minWidth={0}>
-                    <ScatterChart
-                        margin={{ top: 5, right: 20, bottom: 20, left: 0 }}
-                        syncId="actions-layer"
-                    >
-                        <CartesianGrid strokeDasharray="2 4" stroke="#98A6D4" strokeOpacity={0.3} />
-                        {/* Explicit domain prevents empty chart collapse when no forecast actions exist */}
-                        <XAxis
-                            dataKey="timestamp"
-                            type="number"
-                            domain={[forecastBoundaryTimestamp, lastTimestamp]}
-                            tickFormatter={(v) => formatTimestamp(v, granularity)}
-                            tick={{ fontSize: 9, fill: '#FFFFFF' }}
-                            axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
-                            tickLine={false}
-                        />
-                        {/* Hidden Y-axis */}
-                        <YAxis
-                            type="number"
-                            dataKey="categoryY"
-                            domain={[-0.5, 5.5]}
-                            tick={false}
-                            axisLine={false}
-                            tickLine={false}
-                            width={0}
-                        />
-                        <Tooltip content={<ActionTooltip />} wrapperStyle={{ zIndex: 50 }} />
-
-                        <ChartDefs />
-                        <Scatter
-                            data={forecastData}
-                            dataKey="categoryY"
-                            shape={(props: any) => {
-                                const event = props.payload as ActionEvent & { categoryY: number };
-                                const color = event.isAI ? '#6366f1' : '#a855f7';
-                                if (event.isAI) {
-                                    return (
-                                        <polygon
-                                            points={`${props.cx},${props.cy - 5} ${props.cx + 5},${props.cy} ${props.cx},${props.cy + 5} ${props.cx - 5},${props.cy}`}
-                                            fill={color}
-                                            fillOpacity={0.1}
-                                            stroke={color}
-                                            strokeWidth={2}
-                                            strokeDasharray="4 4"
-                                            filter="url(#neon-glow)"
-                                        />
-                                    );
-                                }
-                                return (
-                                    <circle
-                                        cx={props.cx}
-                                        cy={props.cy}
-                                        r={5}
-                                        fill={color}
-                                        fillOpacity={0.1}
-                                        stroke={color}
-                                        strokeWidth={2}
-                                        strokeDasharray="4 4"
-                                        filter="url(#neon-glow)"
-                                    />
-                                );
-                            }}
-                        />
-                    </ScatterChart>
-                </ResponsiveContainer>
-            </div>
-        </div>
+        <ResponsiveContainer width="100%" height={height} minWidth={0}>
+            <ScatterChart margin={{ top: 5, right: 20, bottom: 20, left: 0 }}>
+                <CartesianGrid strokeDasharray="2 4" stroke="#98A6D4" strokeOpacity={0.3} />
+                <XAxis
+                    dataKey="timestamp"
+                    type="number"
+                    scale="time"
+                    domain={xDomain}
+                    tickFormatter={(v) => formatTimestamp(v, granularity)}
+                    tick={{ fontSize: 9, fill: '#FFFFFF' }}
+                    axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
+                    tickLine={false}
+                />
+                <YAxis
+                    type="number"
+                    dataKey="categoryY"
+                    domain={[-1, 6]}
+                    ticks={[0, 1, 2, 3, 4, 5]}
+                    tickFormatter={(v: number) => ACTION_CATEGORIES[v] ?? ''}
+                    tick={{ fontSize: 8, fill: '#FFFFFF' }}
+                    axisLine={false}
+                    tickLine={false}
+                    width={COMMON_Y_AXIS_WIDTH}
+                />
+                <Tooltip content={<ActionTooltip />} wrapperStyle={{ zIndex: 50 }} />
+                <ChartDefs />
+                <Scatter
+                    data={chartData}
+                    dataKey="categoryY"
+                    shape={(props: any) => {
+                        const event = props.payload as ActionEvent & { categoryY: number };
+                        const color = event.isAI ? '#6366f1' : '#a855f7';
+                        if (event.isAI) {
+                            return (
+                                <polygon
+                                    points={`${props.cx},${props.cy - 6} ${props.cx + 6},${props.cy} ${props.cx},${props.cy + 6} ${props.cx - 6},${props.cy}`}
+                                    fill={color}
+                                    stroke="#fff"
+                                    strokeWidth={1}
+                                    filter="url(#neon-glow)"
+                                />
+                            );
+                        }
+                        return (
+                            <circle
+                                cx={props.cx}
+                                cy={props.cy}
+                                r={6}
+                                fill={color}
+                                stroke="#fff"
+                                strokeWidth={1}
+                                filter="url(#neon-glow)"
+                            />
+                        );
+                    }}
+                />
+            </ScatterChart>
+        </ResponsiveContainer>
     );
 }
 
 function ProductLayer({
     data,
+    xDomain,
     granularity,
     expanded,
-    predictionStart,
 }: {
     data: ProductMetric[];
+    xDomain: [number, number];
     granularity: TimeGranularity;
     expanded: boolean;
-    predictionStart: number;
 }) {
     const height = expanded ? 300 : 100;
 
-    // Guard: during granularity transition, predictionStart may exceed data.length
-    const safePredictionStart = Math.min(predictionStart, data.length);
-
-    // Split data into historical and forecast
-    const historicalData = useMemo(() => data.slice(0, safePredictionStart), [data, safePredictionStart]);
-    const forecastData = useMemo(() => data.slice(safePredictionStart), [data, safePredictionStart]);
-
-    // Calculate shared Y-axis domain from full dataset
-    const yDomain = useMemo(() => {
-        if (data.length === 0) return [0, 1500];
-        const maxVal = Math.max(...data.map(d => d.output), ...data.map(d => d.target));
-        return [0, Math.ceil(maxVal * 1.1)];
+    const yDomain = useMemo((): [number, number] => {
+        if (data.length === 0) return [700, 1300];
+        const vals = data.flatMap((d) => [d.output, d.target]);
+        return [Math.min(...vals) * 0.95, Math.max(...vals) * 1.05];
     }, [data]);
 
     return (
-        <div className="flex w-full">
-            {/* Historical Chart - 80% */}
-            <div className="w-[80%]">
-                <ResponsiveContainer width="100%" height={height} minWidth={0}>
-                    <ComposedChart
-                        data={historicalData}
-                        margin={{ top: 5, right: 0, bottom: 0, left: 0 }}
-                    >
-                        <CartesianGrid strokeDasharray="2 4" stroke="#98A6D4" strokeOpacity={0.3} />
-                        <XAxis
-                            dataKey="timestamp"
-                            tickFormatter={(v) => formatTimestamp(v, granularity)}
-                            tick={{ fontSize: 9, fill: '#FFFFFF' }}
-                            axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
-                            tickLine={false}
-                        />
-                        <YAxis
-                            tick={{ fontSize: 9, fill: '#FFFFFF' }}
-                            axisLine={false}
-                            tickLine={false}
-                            width={50}
-                            domain={yDomain}
-                            tickFormatter={formatNumber}
-                        />
-                        <Tooltip content={<ProductTooltip />} wrapperStyle={{ zIndex: 50 }} />
-                        <ChartDefs />
-                        {/* Target area - solid */}
-                        <Area type="monotone" dataKey="target" fill="#a78bfa15" stroke="#a78bfa" strokeWidth={1} strokeDasharray="4 4" dot={false} />
-                        {/* Output - Area with Neon Gradient */}
-                        <Area
-                            type="monotone"
-                            dataKey="output"
-                            stroke="#a78bfa"
-                            strokeWidth={2}
-                            fill="url(#gradient-product)"
-                            activeDot={{ r: 4, fill: '#a78bfa', stroke: '#fff', strokeWidth: 2 }}
-                        />
-                        {/* Uptime (expanded only) */}
-                        {expanded && (
-                            <YAxis yAxisId={1} orientation="right" tick={{ fontSize: 9, fill: '#FFFFFF' }} axisLine={false} tickLine={false} width={35} tickFormatter={(v: number) => v + '%'} />
-                        )}
-                        {expanded && (
-                            <Line isAnimationActive={false} type="monotone" dataKey="uptime" stroke="#4ade80" strokeWidth={1} dot={false} strokeDasharray="2 2" yAxisId={1} />
-                        )}
-                    </ComposedChart>
-                </ResponsiveContainer>
-            </div>
-
-            {/* Dashed separator */}
-            <div className="w-[2px] bg-[#98A6D4] relative opacity-30">
-                <div className="absolute inset-0 border-l-2 border-dashed border-[#98A6D4]" />
-                <div className="absolute top-0 left-1/2 -translate-x-1/2 bg-[#98A6D4] text-[#171921] text-[8px] px-1 py-0.5 rounded font-bold whitespace-nowrap">
-                    NOW
-                </div>
-            </div>
-
-            {/* Forecast Chart - 20% */}
-            <div className="w-[20%]">
-                <ResponsiveContainer width="100%" height={height} minWidth={0}>
-                    <ComposedChart
-                        data={forecastData}
-                        margin={{ top: 5, right: 20, bottom: 0, left: 0 }}
-                    >
-                        <CartesianGrid strokeDasharray="2 4" stroke="#98A6D4" strokeOpacity={0.3} />
-                        <XAxis
-                            dataKey="timestamp"
-                            tickFormatter={(v) => formatTimestamp(v, granularity)}
-                            tick={{ fontSize: 9, fill: '#FFFFFF' }}
-                            axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
-                            tickLine={false}
-                        />
-                        {/* Hidden Y-axis with same domain */}
-                        <YAxis tick={false} axisLine={false} tickLine={false} width={0} domain={yDomain} />
-                        <Tooltip content={<ProductTooltip />} wrapperStyle={{ zIndex: 50 }} />
-
-                        <ChartDefs />
-                        {/* Target area - forecast (lighter) */}
-                        <Area type="monotone" dataKey="target" fill="#a78bfa10" stroke="#a78bfa" strokeWidth={1} strokeDasharray="4 4" dot={false} />
-                        {/* Output - Forecast Area */}
-                        <Area
-                            type="monotone"
-                            dataKey="output"
-                            stroke="#a78bfa"
-                            strokeWidth={2}
-                            strokeDasharray="4 4"
-                            fill="url(#gradient-product)"
-                            fillOpacity={0.5}
-                        />
-                        {/* Uptime - dashed (expanded only) */}
-                        {expanded && (
-                            <YAxis yAxisId={1} orientation="right" tick={false} axisLine={false} tickLine={false} width={0} />
-                        )}
-                        {expanded && (
-                            <Line isAnimationActive={false} type="monotone" dataKey="uptime" stroke="#4ade80" strokeWidth={1} dot={false} strokeDasharray="4 2" yAxisId={1} />
-                        )}
-                    </ComposedChart>
-                </ResponsiveContainer>
-            </div>
-        </div>
+        <ResponsiveContainer width="100%" height={height} minWidth={0}>
+            <ComposedChart data={data} margin={{ top: 5, right: 20, bottom: 0, left: 0 }}>
+                <ChartDefs />
+                <CartesianGrid strokeDasharray="2 4" stroke="#98A6D4" strokeOpacity={0.3} />
+                <XAxis
+                    dataKey="timestamp"
+                    type="number"
+                    scale="time"
+                    domain={xDomain}
+                    tickFormatter={(v) => formatTimestamp(v, granularity)}
+                    tick={{ fontSize: 9, fill: '#FFFFFF' }}
+                    axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
+                    tickLine={false}
+                />
+                <YAxis
+                    tick={{ fontSize: 9, fill: '#FFFFFF' }}
+                    axisLine={false}
+                    tickLine={false}
+                    width={COMMON_Y_AXIS_WIDTH}
+                    domain={yDomain}
+                    tickFormatter={formatNumber}
+                />
+                <Tooltip content={<ProductTooltip />} wrapperStyle={{ zIndex: 50 }} />
+                {/* Target — dashed reference line */}
+                <Area isAnimationActive={false} type="monotone" dataKey="target" fill="#a78bfa10" stroke="#a78bfa" strokeWidth={1} strokeDasharray="4 4" dot={false} />
+                {/* Output — main line */}
+                <Area
+                    isAnimationActive={false}
+                    type="monotone"
+                    dataKey="output"
+                    stroke="#a78bfa"
+                    strokeWidth={2}
+                    fill="url(#gradient-product)"
+                    dot={false}
+                    activeDot={{ r: 4, fill: '#a78bfa', stroke: '#fff', strokeWidth: 2 }}
+                />
+                {expanded && (
+                    <>
+                        <YAxis yAxisId={1} orientation="right" tick={{ fontSize: 9, fill: '#FFFFFF' }} axisLine={false} tickLine={false} width={35} tickFormatter={(v: number) => `${v}%`} />
+                        <Line isAnimationActive={false} type="monotone" dataKey="uptime" stroke="#4ade80" strokeWidth={1} dot={false} strokeDasharray="2 2" yAxisId={1} />
+                    </>
+                )}
+            </ComposedChart>
+        </ResponsiveContainer>
     );
 }
 
@@ -1237,24 +913,19 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
     ];
 
     const {
-        timestamps,
         sensorData,
         energyData,
-        actionData,
         productData,
+        xDomain,
         pointCount,
-        predictionStart,
-        forecastBoundaryTimestamp,
         isStreaming,
         triggerAnomaly,
         connectorStatus,
         nodeMappings,
     } = useConnectorTimeline(activeConnectorId, granularity);
 
-    const lastTimestamp = useMemo(
-        () => (timestamps.length > 0 ? timestamps[timestamps.length - 1] : null),
-        [timestamps]
-    );
+    // Live actions are not yet wired to the connector — placeholder for future integration
+    const actionData: ActionEvent[] = [];
 
     // Trigger anomaly effect
     useEffect(() => {
@@ -1318,14 +989,8 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
     const latestProduct = productData[productData.length - 1];
 
     // AI vs Human counts for action stats
-    const aiCount = useMemo(
-        () => actionData.filter((a) => a.isAI).length,
-        [actionData]
-    );
-    const humanCount = useMemo(
-        () => actionData.filter((a) => !a.isAI).length,
-        [actionData]
-    );
+    const aiCount = actionData.filter((a) => a.isAI).length;
+    const humanCount = actionData.filter((a) => !a.isAI).length;
 
     return (
         <div className="w-full min-h-full bg-[#171921] text-white flex flex-col relative">
@@ -1478,9 +1143,9 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
                         <div className="px-2">
                             <ProductLayer
                                 data={productData}
+                                xDomain={xDomain}
                                 granularity={granularity}
                                 expanded={expandedLayer === 'product'}
-                                predictionStart={predictionStart}
                             />
                         </div>
                     )}
@@ -1530,9 +1195,9 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
                             <div className="px-2">
                                 <SensorLayer
                                     data={sensorData}
+                                    xDomain={xDomain}
                                     granularity={granularity}
                                     expanded={expandedLayer === 'sensors'}
-                                    predictionStart={predictionStart}
                                     visibleSensors={visibleSensors}
                                 />
                             </div>
@@ -1570,9 +1235,9 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
                         <div className="px-2">
                             <EnergyLayer
                                 data={energyData}
+                                xDomain={xDomain}
                                 granularity={granularity}
                                 expanded={expandedLayer === 'energy'}
-                                predictionStart={predictionStart}
                             />
                         </div>
                     )}
@@ -1606,11 +1271,9 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
                         <div className="px-2">
                             <ActionsLayer
                                 data={actionData}
+                                xDomain={xDomain}
                                 granularity={granularity}
                                 expanded={expandedLayer === 'actions'}
-                                forecastBoundaryTimestamp={forecastBoundaryTimestamp}
-                                lastTimestamp={lastTimestamp ?? Date.now()}
-                                firstTimestamp={timestamps[0] ?? Date.now()}
                             />
                         </div>
                     )}
@@ -1634,13 +1297,6 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
                     </span>
                     <span className="flex items-center gap-2">
                         <span className="w-6 h-px bg-violet-500 inline-block" /> Pressure
-                    </span>
-                    <span className="flex items-center gap-2">
-                        <span
-                            className="w-6 h-px bg-indigo-400 inline-block"
-                            style={{ borderTop: '1px dashed #818cf8' }}
-                        />{' '}
-                        Predicted
                     </span>
                     <span className="flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />{' '}

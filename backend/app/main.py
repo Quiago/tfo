@@ -9,6 +9,7 @@ from app.api.v1.router import api_router
 from app.api.v1.llms import service as llm_service
 from app.core.logging import setup_logging
 from app.db.engine import create_db_and_tables
+from app.core.config import settings
 
 
 @asynccontextmanager
@@ -34,7 +35,8 @@ app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=settings.allowed_origins_list,
+    allow_origin_regex=settings.ALLOW_ORIGIN_REGEX or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
