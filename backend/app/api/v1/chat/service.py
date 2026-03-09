@@ -135,13 +135,14 @@ async def send_message(conversation_id: str, user_id: int, content: str, max_new
 
     conv = get_conversation(conversation_id, user_id, session)
     memories = _get_user_memories(user_id, session)
+    kb_docs = _get_kb_documents(session)
 
     _save_message(conv.id, "user", content, session)
     _auto_title(conv, content, session)
 
     messages = list_messages(conversation_id, user_id, session)
     model_config = get_model_config(conv.model_id)
-    context = build_context(conv, messages, memories, model_config=model_config)
+    context = build_context(conv, messages, memories, model_config=model_config, kb_documents=kb_docs)
 
     final_text, tool_calls_log = await _run_tool_loop(context, max_new_tokens, temperature, session, model_config)
     final_text, _ = _extract_thinking(final_text)  # strip think block before saving
@@ -169,12 +170,13 @@ async def send_message_streaming(conversation_id: str, user_id: int, content: st
         return
 
     memories = _get_user_memories(user_id, session)
+    kb_docs = _get_kb_documents(session)
     _save_message(conv.id, "user", content, session)
     _auto_title(conv, content, session)
 
     messages = list_messages(conversation_id, user_id, session)
     model_config = get_model_config(conv.model_id)
-    context = build_context(conv, messages, memories, model_config=model_config)
+    context = build_context(conv, messages, memories, model_config=model_config, kb_documents=kb_docs)
     tools = OPENAI_TOOL_SCHEMAS if model_config.supports_native_tools else None
 
     tool_calls_log: list[dict] = []
@@ -335,3 +337,10 @@ def _touch_conversation(conv: Conversation, session: Session) -> None:
     conv.updated_at = datetime.now(UTC)
     session.add(conv)
     session.commit()
+
+
+def _get_kb_documents(session: Session) -> list[dict]:
+    """Returns a lightweight list of KB document metadata for context injection."""
+    from app.api.v1.knowledge_base.models import Document
+    docs = list(session.exec(select(Document).order_by(Document.created_at.desc())).all())
+    return [{"title": d.title, "chunk_count": d.chunk_count} for d in docs]

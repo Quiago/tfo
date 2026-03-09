@@ -11,20 +11,33 @@ from app.api.v1.chat.tools import TOOL_SCHEMAS
 _BASE_SYSTEM = (
     "You are Tripolar AI, an industrial AI assistant specialized in manufacturing, "
     "process automation, and industrial IoT.\n"
-    "You help plant operators monitor equipment, analyze sensor data, and control industrial assets safely.\n"
+    "You help plant operators monitor equipment, analyze sensor data, control industrial assets, "
+    "and answer questions about company documents and manuals.\n"
     "Be precise with measurements, always include units, and be safety-conscious when suggesting write operations on equipment.\n\n"
-    "CRITICAL RULE: You have tools to read REAL data from connected equipment. "
-    "NEVER invent, guess, or describe asset values from memory. "
-    "When the user asks about assets, equipment, sensor readings, or connectors — CALL THE TOOLS FIRST, then answer with the real data."
+    "CRITICAL RULES — follow these exactly:\n"
+    "1. When the user asks about assets, equipment, sensor readings, or connectors → "
+    "call list_assets or read_asset_property FIRST, then answer with the real data.\n"
+    "2. When the user asks about documents, manuals, procedures, specifications, or says "
+    "'this document', 'the document', 'what does it say', 'summarize', 'explain this' → "
+    "call search_knowledge_base FIRST with a relevant query, then answer with the retrieved content.\n"
+    "3. NEVER invent, guess, or answer from memory. Always call a tool first when real data or documents are involved.\n"
+    "4. If the user's question is ambiguous but documents are available, "
+    "call search_knowledge_base with the user's exact words as the query."
 )
 
 _ASSET_CATALOG = (
     "\n## Available Assets — use these exact IDs and property names in tool calls:\n{catalog}\n"
 )
 
+_KB_DOCUMENTS = (
+    "\n## Knowledge Base — Documents available for search:\n"
+    "Call search_knowledge_base(query) for ANY question about these documents.\n"
+    "{doc_list}\n"
+)
+
 _TOOLS_SECTION = (
     "\n## Available Tools — CALL THESE TO GET REAL DATA\n"
-    "You MUST call a tool for any question about assets, sensors, readings, connectors, or equipment state.\n"
+    "You MUST call a tool for any question about assets, sensors, readings, connectors, or documents.\n"
     "Do NOT describe, guess, or narrate. Output the tool call, wait for the result, then answer.\n\n"
     "Call format — output EXACTLY this on its own line, no extra text:\n"
     '<tool_call>{{"name": "TOOL_NAME", "arguments": {{"param": "value"}}}}</tool_call>\n\n'
@@ -90,9 +103,13 @@ def build_context(
     memories: list[MemoryEntry],
     model_config: ModelConfig = None,
     asset_catalog: list[dict] = None,
+    kb_documents: list[dict] | None = None,
 ) -> list[dict]:
     """
     Construye la lista de mensajes en formato OpenAI para el engine.
+
+    kb_documents: list of {"title": str, "chunk_count": int} — injected into
+    the system prompt so the model knows which documents it can search.
     """
     system_prompt = conversation.system_prompt or _BASE_SYSTEM
 
@@ -110,6 +127,13 @@ def build_context(
             line = f'- asset_id="{a["asset_id"]}"  name="{a["name"]}"  properties=[{props}]'
             lines.append(line)
         system_parts.append(_ASSET_CATALOG.format(catalog="\n".join(lines)))
+
+    if kb_documents:
+        doc_lines = [
+            f'- "{d["title"]}" ({d.get("chunk_count", "?")} chunks)'
+            for d in kb_documents
+        ]
+        system_parts.append(_KB_DOCUMENTS.format(doc_list="\n".join(doc_lines)))
 
     if memories:
         mem_text = "\n## Long-term Context\n" + "\n".join(f"- {m.content}" for m in memories)
