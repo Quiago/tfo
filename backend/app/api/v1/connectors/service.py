@@ -207,6 +207,28 @@ async def write(connector_id: str, path: str, value, session: Session, **kwargs)
     logger.info("connector_write", extra={"connector_id": connector_id, "path": path})
 
 
+async def read_batch(connector_id: str, node_ids: list[str], session: Session) -> list[dict]:
+    """
+    Lee múltiples nodos en una sola sesión OPC-UA.
+    Otros backends devuelven BackendNotImplemented.
+    """
+    connector = get_connector(connector_id, session)
+    if not connector.is_active:
+        raise ConnectorInactive
+    backend = _get_backend(connector)
+    if not hasattr(backend, "read_batch"):
+        raise BackendNotImplemented
+    try:
+        return await backend.read_batch(node_ids)
+    except Exception as exc:
+        logger.warning(
+            "connector_batch_read_error",
+            extra={"connector_id": connector_id, "error": str(exc)},
+            exc_info=True,
+        )
+        raise ConnectorReadError
+
+
 async def health(connector_id: str, session: Session) -> bool:
     connector = get_connector(connector_id, session)
     backend = _get_backend(connector)

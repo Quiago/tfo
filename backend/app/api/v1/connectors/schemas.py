@@ -99,3 +99,21 @@ class ConnectorHealthResponse(BaseModel):
     connector_id: str
     reachable: bool
     detail: str | None = None
+
+
+class BatchReadRequest(BaseModel):
+    node_ids: list[str]
+
+
+class BatchReadItem(BaseModel):
+    node_id: str
+    value: Any
+    data_type: str | None = None
+    status: str | None = None
+    source_timestamp: str | None = None
+    error: str | None = None
+
+
+class BatchReadResponse(BaseModel):
+    connector_id: str
+    results: list[BatchReadItem]

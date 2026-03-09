@@ -1,8 +1,6 @@
-import { apiFetch, ApiError } from '@/lib/services/backend';
+import { apiFetch, ApiError, BASE_URL } from '@/lib/services/backend';
 import { getStoredToken } from '@/lib/store/auth-store';
 import type { KBDocument } from '@/lib/types/chat';
-
-const BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:8000';
 
 export async function listDocuments(): Promise<KBDocument[]> {
     return apiFetch<KBDocument[]>('/knowledge-base/documents');
