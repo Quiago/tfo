@@ -13,4 +13,10 @@ dependencies = [
     "accelerate>=0.34.0",
     "pypdf>=6.8.0",
     "python-docx>=1.2.0",
+    "openpyxl>=3.1.5",
+    "xlrd>=2.0.2",
+    "python-pptx>=1.0.2",
+    "beautifulsoup4>=4.14.3",
+    "striprtf>=0.0.29",
+    "ebooklib>=0.20",
 ]

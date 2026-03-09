@@ -861,7 +861,7 @@ export function AiChatBubble() {
                             ref={fileInputRef}
                             type="file"
                             className="hidden"
-                            accept=".pdf,.txt,.md,.docx,.csv"
+                            accept=".pdf,.txt,.md,.rst,.csv,.tsv,.json,.yaml,.yml,.xml,.docx,.pptx,.xlsx,.xls,.html,.htm,.rtf,.epub,.log"
                             onChange={handleFileUpload}
                         />
 
