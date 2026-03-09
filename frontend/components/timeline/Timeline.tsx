@@ -400,8 +400,11 @@ const SensorLayer = memo(function SensorLayer({
         ...s,
         anomaly_y: s.anomaly ? s.vibration : null,
     })), [data]);
+<<<<<<< HEAD
 
     const ticks = useMemo(() => xTicks(xDomain), [xDomain]);
+=======
+>>>>>>> debc9d9 (fix: improve the deplyment env variables and real time streaming by timeframe)
 
     return (
         <div>
@@ -417,7 +420,10 @@ const SensorLayer = memo(function SensorLayer({
                         type="number"
                         scale="time"
                         domain={xDomain}
+<<<<<<< HEAD
                         ticks={ticks}
+=======
+>>>>>>> debc9d9 (fix: improve the deplyment env variables and real time streaming by timeframe)
                         tickFormatter={(v) => formatTimestamp(v, granularity)}
                         tick={{ fontSize: 9, fill: '#FFFFFF' }}
                         axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
@@ -491,7 +497,10 @@ const EnergyLayer = memo(function EnergyLayer({
                     type="number"
                     scale="time"
                     domain={xDomain}
+<<<<<<< HEAD
                     ticks={ticks}
+=======
+>>>>>>> debc9d9 (fix: improve the deplyment env variables and real time streaming by timeframe)
                     tickFormatter={(v) => formatTimestamp(v, granularity)}
                     tick={{ fontSize: 9, fill: '#FFFFFF' }}
                     axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
@@ -561,8 +570,11 @@ const ActionsLayer = memo(function ActionsLayer({
         data.map((a) => ({ ...a, categoryY: categoryToY[a.category] ?? 0 })),
         [data]
     );
+<<<<<<< HEAD
 
     const ticks = useMemo(() => xTicks(xDomain), [xDomain]);
+=======
+>>>>>>> debc9d9 (fix: improve the deplyment env variables and real time streaming by timeframe)
 
     return (
         <ResponsiveContainer width="100%" height={height} minWidth={0}>
@@ -573,7 +585,10 @@ const ActionsLayer = memo(function ActionsLayer({
                     type="number"
                     scale="time"
                     domain={xDomain}
+<<<<<<< HEAD
                     ticks={ticks}
+=======
+>>>>>>> debc9d9 (fix: improve the deplyment env variables and real time streaming by timeframe)
                     tickFormatter={(v) => formatTimestamp(v, granularity)}
                     tick={{ fontSize: 9, fill: '#FFFFFF' }}
                     axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
