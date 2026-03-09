@@ -164,6 +164,7 @@ export function useConnectorTimeline(
     granularity: TimeGranularity,
 ) {
     const [status, setStatus]             = useState<ConnectorStatus>(connectorId ? 'discovering' : 'idle');
+    const [errorDetail, setErrorDetail]   = useState<string | null>(null);
     const [nodeMappings, setNodeMappings]  = useState<NodeMapping[]>([]);
     const [sensorBuffer, setSensorBuffer]  = useState<SensorReading[]>([]);
 
@@ -187,6 +188,7 @@ export function useConnectorTimeline(
         }
 
         setStatus('discovering');
+        setErrorDetail(null);
         setNodeMappings([]);
         setSensorBuffer([]);
         connectedRef.current = false;
@@ -199,6 +201,8 @@ export function useConnectorTimeline(
                 const discovery = await discoverConnector(connectorId!);
                 if (cancelled) return;
 
+                // Prefer known-numeric nodes; fall back to Unknown-type; last resort: any node.
+                // This matches the discovery behaviour that worked before strict filtering was added.
                 const numericNodes = discovery.nodes.filter(
                     (n) => NUMERIC_DATA_TYPES.has(n.data_type) || n.data_type === 'Unknown',
                 );
@@ -211,7 +215,10 @@ export function useConnectorTimeline(
                         return score(a) - score(b);
                     });
 
-                const candidates = (scored.length >= 4 ? scored : numericNodes).slice(0, 4);
+                // If the strict numeric filter yields 0 nodes, fall back to ALL nodes
+                // (some OPC-UA servers report data types as non-numeric even for numeric tags).
+                const pool = numericNodes.length > 0 ? (scored.length >= 4 ? scored : numericNodes) : discovery.nodes;
+                const candidates = pool.slice(0, 4);
                 nodeIdsRef.current = candidates.map((n) => n.node_id);
 
                 const mappings: NodeMapping[] = candidates.map((n, i) => ({
@@ -221,16 +228,30 @@ export function useConnectorTimeline(
                     dataType:    n.data_type,
                 }));
                 setNodeMappings(mappings);
-                console.log('[Connector] Discovery →', mappings.map((m) => `${m.field}=${m.nodeId}`));
+                console.log('[Connector] Discovery →', {
+                    total: discovery.nodes.length,
+                    numeric: numericNodes.length,
+                    selected: mappings.map((m) => `${m.field}=${m.nodeId} (${m.dataType})`),
+                });
             } catch (err) {
                 if (cancelled) return;
                 console.error('[Connector] discovery failed:', err);
                 const httpStatus = err instanceof ApiError ? err.status : null;
+                const detail = err instanceof ApiError
+                    ? `HTTP ${err.status}: ${err.message}`
+                    : (err instanceof Error ? err.message : String(err));
+                setErrorDetail(detail);
                 setStatus(httpStatus === 404 ? 'not_found' : 'error');
                 return;
             }
 
-            if (nodeIdsRef.current.length === 0) { setStatus('error'); return; }
+            if (nodeIdsRef.current.length === 0) {
+                const msg = 'No readable nodes found on this connector. Check that the server has tags exposed.';
+                console.warn('[Connector]', msg);
+                setErrorDetail(msg);
+                setStatus('error');
+                return;
+            }
 
             // Seed prevRaw so the first poll has fallback values
             try {
@@ -268,9 +289,13 @@ export function useConnectorTimeline(
                 batchResult = await readConnectorBatch(connectorId, nodeIdsRef.current);
             } catch (err) {
                 consecutiveErrorsRef.current += 1;
-                console.warn(`[Connector] batch read failed (${consecutiveErrorsRef.current}/${MAX_CONSECUTIVE_ERRORS}):`, err);
+                const detail = err instanceof ApiError
+                    ? `HTTP ${err.status}: ${err.message}`
+                    : (err instanceof Error ? err.message : String(err));
+                console.warn(`[Connector] batch read failed (${consecutiveErrorsRef.current}/${MAX_CONSECUTIVE_ERRORS}): ${detail}`, err);
                 if (consecutiveErrorsRef.current >= MAX_CONSECUTIVE_ERRORS) {
                     connectedRef.current = false;
+                    setErrorDetail(detail);
                     setStatus('error');
                 }
                 return;
@@ -296,13 +321,11 @@ export function useConnectorTimeline(
             }
 
             if (!anySuccess) {
-                consecutiveErrorsRef.current += 1;
-                console.warn(`[Connector] no numeric values from batch (${consecutiveErrorsRef.current}/${MAX_CONSECUTIVE_ERRORS}). Items:`, batchResult.results);
-                if (consecutiveErrorsRef.current >= MAX_CONSECUTIVE_ERRORS) {
-                    connectedRef.current = false;
-                    setStatus('error');
-                }
-                return;
+                // If the batch HTTP call succeeded but all values are non-numeric
+                // (e.g. String/Boolean OPC-UA tags), keep previous values and
+                // continue streaming — don't count as a connection error.
+                // Only hard HTTP errors (caught above) increment the error counter.
+                console.warn('[Connector] batch returned no numeric values — using previous.', batchResult.results);
             }
             consecutiveErrorsRef.current = 0;
 
@@ -386,6 +409,7 @@ export function useConnectorTimeline(
         isStreaming:     isLive,
         triggerAnomaly,
         connectorStatus: status,
+        connectorError:  errorDetail,
         nodeMappings,
     };
 }

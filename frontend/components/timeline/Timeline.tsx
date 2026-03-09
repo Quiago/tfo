@@ -836,11 +836,13 @@ function SimBadge() {
 function ConnectorOverlay({
     status,
     connectorId,
+    errorDetail,
     onRetry,
     onChangeConnector,
 }: {
     status: ConnectorStatus;
     connectorId: string;
+    errorDetail: string | null;
     onRetry: () => void;
     onChangeConnector: () => void;
 }) {
@@ -872,9 +874,14 @@ function ConnectorOverlay({
             ) : (
                 <span className="h-8 w-8 rounded-full border-2 border-zinc-600 border-t-cyan-400 animate-spin" />
             )}
-            <div className="text-center">
+            <div className="text-center max-w-sm">
                 <p className="text-sm font-semibold text-white">{title}</p>
-                <p className="text-xs text-zinc-400 mt-1 max-w-xs">{sub}</p>
+                <p className="text-xs text-zinc-400 mt-1">{sub}</p>
+                {errorDetail && (
+                    <p className="text-[10px] font-mono text-red-400 mt-2 bg-red-950/30 border border-red-900/40 rounded px-2 py-1 text-left break-all">
+                        {errorDetail}
+                    </p>
+                )}
             </div>
             {isError && (
                 <div className="flex gap-2">
@@ -944,6 +951,7 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
         isStreaming,
         triggerAnomaly,
         connectorStatus,
+        connectorError,
         nodeMappings,
     } = useConnectorTimeline(activeConnectorId, granularity);
 
@@ -1029,6 +1037,7 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
                 <ConnectorOverlay
                     status={connectorStatus}
                     connectorId={activeConnectorId}
+                    errorDetail={connectorError ?? null}
                     onRetry={() => {
                         // Re-trigger discovery by resetting the connector id
                         const id = activeConnectorId;
