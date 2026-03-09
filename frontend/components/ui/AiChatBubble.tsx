@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
     AlertCircle, ArrowUp, BookOpen, Brain, ChevronDown,
-    FileText, Loader2, MessageSquare, Minus, Paperclip, Plus,
+    FileText, Loader2, MessageSquare, Paperclip, Plus,
     Sparkles, Trash2, Upload, Wrench, X,
 } from 'lucide-react'
 import type { Conversation, KBDocument, LocalMessage, MemoryEntry, ModelCatalog, ToolCallEntry } from '@/lib/types/chat'
@@ -229,16 +229,9 @@ export function AiChatBubble() {
         if (!open) return
         setLoadingConvs(true)
         listConversations()
-            .then(convs => {
-                setConversations(convs)
-                if (convs.length > 0 && !activeConvId) {
-                    setActiveConvId(convs[0].id)
-                    loadConvMessages(convs[0].id)
-                }
-            })
+            .then(convs => setConversations(convs))
             .catch(err => console.error('[Chat] list conversations failed:', err))
             .finally(() => setLoadingConvs(false))
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open])
 
     // ── Load docs / memory when sidebar tab opens ──────────────────────────
@@ -401,16 +394,12 @@ export function AiChatBubble() {
     }, [handleSend])
 
     // ── Conversation management ────────────────────────────────────────────
-    async function handleNewConversation() {
-        try {
-            const modelId = currentModelId ?? catalog?.default_model ?? ''
-            const conv = await createConversation({ model_id: modelId })
-            setConversations(prev => [conv, ...prev])
-            setActiveConvId(conv.id)
-            setMessages([])
-        } catch (e) {
-            console.error('[Chat] create conversation failed:', e)
-        }
+    function handleNewConversation() {
+        // Don't create a DB record yet — lazy creation happens on first send
+        setActiveConvId(null)
+        setMessages([])
+        setError(null)
+        setNoModelLoaded(false)
     }
 
     async function handleDeleteConversation(id: string) {
@@ -556,18 +545,26 @@ export function AiChatBubble() {
                                                 <Loader2 size={14} className="animate-spin text-zinc-400" />
                                             </div>
                                         )}
+                                        {conversations.length === 0 && !loadingConvs && (
+                                            <p className="text-xs text-zinc-400 text-center py-4">No previous chats</p>
+                                        )}
                                         {conversations.map(conv => (
                                             <div
                                                 key={conv.id}
                                                 onClick={() => handleSelectConversation(conv)}
-                                                className={`group flex items-center gap-1 rounded-xl px-2.5 py-2 cursor-pointer transition-colors ${conv.id === activeConvId ? 'bg-[#F2F5FF]' : 'hover:bg-[#F7F9FF]'}`}
+                                                className={`group flex items-start gap-1 rounded-xl px-2.5 py-2 cursor-pointer transition-colors ${conv.id === activeConvId ? 'bg-[#F2F5FF]' : 'hover:bg-[#F7F9FF]'}`}
                                             >
-                                                <span className="flex-1 text-xs text-[#3A3A3A] truncate leading-tight">
-                                                    {conv.title ?? `Conv ${conv.id.slice(0, 8)}`}
-                                                </span>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-xs text-[#3A3A3A] truncate leading-tight font-medium">
+                                                        {conv.title ?? 'Untitled chat'}
+                                                    </p>
+                                                    <p className="text-[10px] text-zinc-400 mt-0.5">
+                                                        {new Date(conv.updated_at).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                                    </p>
+                                                </div>
                                                 <button
                                                     onClick={e => { e.stopPropagation(); handleDeleteConversation(conv.id) }}
-                                                    className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition-all flex-shrink-0 p-0.5"
+                                                    className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition-all flex-shrink-0 p-0.5 mt-0.5"
                                                 >
                                                     <Trash2 size={11} />
                                                 </button>
@@ -667,7 +664,7 @@ export function AiChatBubble() {
                         <div className="h-[52px] flex items-center gap-2 px-3 border-b border-[rgba(152,166,212,0.2)] bg-gradient-to-r from-[#FDFEFE] to-[#F2F5FF] flex-shrink-0">
                             {/* Sidebar toggle */}
                             <button
-                                onClick={() => setSideOpen(v => !v)}
+                                onClick={() => { setSideOpen(v => !v); setActiveTab('conversations') }}
                                 title="Conversations, Documents & Memory"
                                 className={`flex items-center gap-1.5 px-2 py-1 rounded-lg transition-colors flex-shrink-0 text-xs font-medium ${sideOpen ? 'bg-[#E8EDFF] text-[#3A3A3A]' : 'text-[#98A6D4] hover:bg-[#F2F5FF] hover:text-[#3A3A3A]'}`}
                             >
@@ -675,9 +672,18 @@ export function AiChatBubble() {
                                 <span className="hidden sm:inline">Chats</span>
                             </button>
 
+                            {/* New chat */}
+                            <button
+                                onClick={() => { setActiveConvId(null); setMessages([]); setError(null) }}
+                                title="New conversation"
+                                className="w-6 h-6 flex items-center justify-center text-[#98A6D4] hover:text-[#3A3A3A] hover:bg-[#F2F5FF] rounded-lg transition-colors flex-shrink-0"
+                            >
+                                <Plus size={14} />
+                            </button>
+
                             {/* Title */}
                             <span className="text-sm font-bold text-[#3A3A3A] flex-1 truncate min-w-0">
-                                {activeConv?.title ?? 'OpsFlow AI'}
+                                {activeConv?.title ?? 'New conversation'}
                             </span>
 
                             {/* Model switcher */}
@@ -717,17 +723,10 @@ export function AiChatBubble() {
                                 )}
                             </div>
 
-                            {/* Minimize */}
+                            {/* Close */}
                             <button
                                 onClick={() => setOpen(false)}
-                                className="w-6 h-6 flex items-center justify-center text-[#98A6D4] hover:text-[#3A3A3A] transition-colors flex-shrink-0"
-                            >
-                                <Minus size={14} />
-                            </button>
-
-                            {/* Close (clears nothing) */}
-                            <button
-                                onClick={() => setOpen(false)}
+                                title="Close"
                                 className="w-6 h-6 flex items-center justify-center text-[#98A6D4] hover:text-[#3A3A3A] transition-colors flex-shrink-0"
                             >
                                 <X size={14} />
@@ -740,13 +739,18 @@ export function AiChatBubble() {
                             className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#FDFEFE] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-zinc-200 [&::-webkit-scrollbar-thumb]:rounded-full"
                         >
                             {messages.length === 0 && !streaming && (
-                                <div className="flex flex-col items-center justify-center h-full gap-3 text-center">
+                                <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-6">
                                     <div className="h-10 w-10 rounded-full bg-cyan-500/10 flex items-center justify-center">
                                         <Sparkles size={20} className="text-cyan-500" />
                                     </div>
                                     <div>
-                                        <p className="text-sm font-semibold text-[#3A3A3A]">OpsFlow AI</p>
-                                        <p className="text-xs text-[#6B7280] mt-0.5">Ask anything about your facility</p>
+                                        <p className="text-sm font-semibold text-[#3A3A3A]">New conversation</p>
+                                        <p className="text-xs text-[#6B7280] mt-0.5">
+                                            Ask anything about your facility.
+                                            {conversations.length > 0 && (
+                                                <> Previous chats are in the <span className="font-medium text-[#3A3A3A]">Chats</span> panel.</>
+                                            )}
+                                        </p>
                                     </div>
                                 </div>
                             )}
@@ -880,7 +884,20 @@ export function AiChatBubble() {
 
             {/* ── Floating Button ──────────────────────────────────────────── */}
             <button
-                onClick={() => setOpen(v => !v)}
+                onClick={() => {
+                    if (open) {
+                        setOpen(false)
+                    } else {
+                        // Always open with a fresh conversation ready
+                        setActiveConvId(null)
+                        setMessages([])
+                        setError(null)
+                        setNoModelLoaded(false)
+                        setSideOpen(true)
+                        setActiveTab('conversations')
+                        setOpen(true)
+                    }
+                }}
                 className={`fixed bottom-6 right-6 z-[100] h-[60px] w-[60px] rounded-full flex items-center justify-center transition-all duration-300 shadow-[0_4px_20px_rgba(145,153,200,0.3)] border-2 ${open
                     ? 'bg-zinc-800 border-zinc-600 text-zinc-400 rotate-90 hover:bg-zinc-700 hover:text-white'
                     : 'bg-[#FDFEFE] border-[#9199C8] text-[#9199C8] hover:scale-110 hover:shadow-[0_6px_28px_rgba(145,153,200,0.45)]'
