@@ -1,19 +1,20 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import {
-    AlertCircle, ArrowUp, BookOpen, Brain, ChevronDown,
-    FileText, Loader2, MessageSquare, Paperclip, Plus,
-    Sparkles, Trash2, Upload, Wrench, X,
-} from 'lucide-react'
-import type { Conversation, KBDocument, LocalMessage, MemoryEntry, ModelCatalog, ToolCallEntry } from '@/lib/types/chat'
 import {
     addMemory, createConversation, deleteConversation,
     deleteMemory, getMessages, listConversations,
     listMemories, streamMessage,
 } from '@/lib/services/chat.service'
-import { getModelCatalog, loadModel } from '@/lib/services/llm.service'
 import { deleteDocument, listDocuments, uploadDocument } from '@/lib/services/knowledge-base.service'
+import { getModelCatalog, loadModel } from '@/lib/services/llm.service'
+import type { Conversation, KBDocument, LocalMessage, MemoryEntry, ModelCatalog, ToolCallEntry } from '@/lib/types/chat'
+import type { LucideIcon } from 'lucide-react'
+import {
+    AlertCircle, ArrowUp, BookOpen, Brain, ChevronDown,
+    FileText, Loader2, MessageSquare, Paperclip, Plus,
+    Sparkles, Trash2, Upload, Wrench, X,
+} from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react'
 
 // ─── LOGO ─────────────────────────────────────────────────────────────────────
 
@@ -544,7 +545,7 @@ export function AiChatBubble() {
                                     ['conversations', MessageSquare, 'Conversations'],
                                     ['docs', FileText, 'Documents'],
                                     ['memory', Brain, 'Memory'],
-                                ] as [SideTab, React.ElementType, string][]).map(([tab, Icon, label]) => (
+                                ] as [SideTab, ComponentType<{ size?: number | string }>, string][]).map(([tab, Icon, label]) => (
                                     <button
                                         key={tab}
                                         onClick={() => setActiveTab(tab)}
@@ -552,7 +553,7 @@ export function AiChatBubble() {
                                         className={`flex-1 py-3 flex items-center justify-center transition-colors ${activeTab === tab
                                             ? 'text-[#3A3A3A] border-b-2 border-[#3A3A3A]'
                                             : 'text-[#98A6D4] hover:text-[#3A3A3A]'
-                                        }`}
+                                            }`}
                                     >
                                         <Icon size={15} />
                                     </button>
@@ -808,7 +809,7 @@ export function AiChatBubble() {
                                             <div className={`px-3 py-2.5 rounded-2xl ${msg.role === 'user'
                                                 ? 'bg-[#3A3A3A] text-white rounded-tr-sm'
                                                 : 'bg-[#F2F5FF] text-[#3A3A3A] rounded-tl-sm'
-                                            }`}>
+                                                }`}>
                                                 {msg.role === 'assistant' ? (
                                                     msg.streaming && !msg.content ? (
                                                         <span className="flex gap-1 items-center h-4">
@@ -935,7 +936,7 @@ export function AiChatBubble() {
                 className={`fixed bottom-6 right-6 z-[100] h-[60px] w-[60px] rounded-full flex items-center justify-center transition-all duration-300 shadow-[0_4px_20px_rgba(145,153,200,0.3)] border-2 ${open
                     ? 'bg-zinc-800 border-zinc-600 text-zinc-400 rotate-90 hover:bg-zinc-700 hover:text-white'
                     : 'bg-[#FDFEFE] border-[#9199C8] text-[#9199C8] hover:scale-110 hover:shadow-[0_6px_28px_rgba(145,153,200,0.45)]'
-                }`}
+                    }`}
             >
                 {open ? <X size={24} /> : <OpsFlowLogo className="w-8 h-8" />}
             </button>
