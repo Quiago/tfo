@@ -12,12 +12,23 @@ _BASE_SYSTEM = (
     "You are Tripolar AI, an industrial AI assistant specialized in manufacturing, "
     "process automation, and industrial IoT.\n"
     "You help plant operators monitor equipment, analyze sensor data, and control industrial assets safely.\n"
-    "Be precise with measurements, always include units, and be safety-conscious when suggesting write operations on equipment.\n"
-    "ALWAYS use the provided tools to get real-time data. NEVER invent or guess sensor values."
+    "Be precise with measurements, always include units, and be safety-conscious when suggesting write operations on equipment.\n\n"
+    "CRITICAL RULE: You have tools to read REAL data from connected equipment. "
+    "NEVER invent, guess, or describe asset values from memory. "
+    "When the user asks about assets, equipment, sensor readings, or connectors — CALL THE TOOLS FIRST, then answer with the real data."
 )
 
 _ASSET_CATALOG = (
     "\n## Available Assets — use these exact IDs and property names in tool calls:\n{catalog}\n"
+)
+
+_TOOLS_SECTION = (
+    "\n## Available Tools — CALL THESE TO GET REAL DATA\n"
+    "You MUST call a tool for any question about assets, sensors, readings, connectors, or equipment state.\n"
+    "Do NOT describe, guess, or narrate. Output the tool call, wait for the result, then answer.\n\n"
+    "Call format — output EXACTLY this on its own line, no extra text:\n"
+    '<tool_call>{{"name": "TOOL_NAME", "arguments": {{"param": "value"}}}}</tool_call>\n\n'
+    "{tool_list}"
 )
 
 _LLAMA_TOOL_RE = re.compile(r"<\|python_tag\|>(.*?)(?:<\|eom_id\|>|<\|eot_id\|>|$)", re.DOTALL)
@@ -50,6 +61,29 @@ def _to_openai_tools(schemas: list) -> list:
 OPENAI_TOOL_SCHEMAS = _to_openai_tools(TOOL_SCHEMAS)
 
 
+def _build_tools_text() -> str:
+    """
+    Builds a human-readable tool reference injected into every system prompt.
+
+    This is the critical fallback: even when apply_chat_template silently drops
+    the tools= argument (common on small or misconfigured models), the model still
+    sees what tools exist and the exact call format it must use.
+    """
+    lines = []
+    for s in TOOL_SCHEMAS:
+        props = s.get("parameters", {}).get("properties", {})
+        if props:
+            params = ", ".join(
+                f'{k}: {v.get("type", "string")}' + (f' — {v["description"]}' if v.get("description") else "")
+                for k, v in props.items()
+            )
+            sig = f'{s["name"]}({params})'
+        else:
+            sig = f'{s["name"]}()  # no arguments needed'
+        lines.append(f"  • {sig}\n    {s['description']}")
+    return _TOOLS_SECTION.format(tool_list="\n".join(lines))
+
+
 def build_context(
     conversation: Conversation,
     messages: list[Message],
@@ -64,6 +98,11 @@ def build_context(
 
     system_parts = [system_prompt]
 
+    # Always inject tool schemas as text — this ensures the model knows what
+    # tools exist and how to call them even when apply_chat_template silently
+    # drops the tools= argument.
+    system_parts.append(_build_tools_text())
+
     if asset_catalog:
         lines = []
         for a in asset_catalog:
@@ -76,6 +115,7 @@ def build_context(
         mem_text = "\n## Long-term Context\n" + "\n".join(f"- {m.content}" for m in memories)
         system_parts.append(mem_text)
 
+    # Keep any model-specific extra instructions (e.g. Gemma fallback coercion)
     if model_config and model_config.fallback_tool_instructions:
         system_parts.append(model_config.fallback_tool_instructions)
 
