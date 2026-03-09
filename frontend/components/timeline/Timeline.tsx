@@ -406,6 +406,8 @@ const SensorLayer = memo(function SensorLayer({
 =======
 >>>>>>> debc9d9 (fix: improve the deplyment env variables and real time streaming by timeframe)
 
+    const ticks = useMemo(() => xTicks(xDomain), [xDomain]);
+
     return (
         <div>
             <ResponsiveContainer width="100%" height={height} minWidth={0}>
@@ -421,9 +423,13 @@ const SensorLayer = memo(function SensorLayer({
                         scale="time"
                         domain={xDomain}
 <<<<<<< HEAD
+<<<<<<< HEAD
                         ticks={ticks}
 =======
 >>>>>>> debc9d9 (fix: improve the deplyment env variables and real time streaming by timeframe)
+=======
+                        ticks={ticks}
+>>>>>>> 002a518 (feat: Use new models more powerful)
                         tickFormatter={(v) => formatTimestamp(v, granularity)}
                         tick={{ fontSize: 9, fill: '#FFFFFF' }}
                         axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
@@ -498,9 +504,13 @@ const EnergyLayer = memo(function EnergyLayer({
                     scale="time"
                     domain={xDomain}
 <<<<<<< HEAD
+<<<<<<< HEAD
                     ticks={ticks}
 =======
 >>>>>>> debc9d9 (fix: improve the deplyment env variables and real time streaming by timeframe)
+=======
+                    ticks={ticks}
+>>>>>>> 002a518 (feat: Use new models more powerful)
                     tickFormatter={(v) => formatTimestamp(v, granularity)}
                     tick={{ fontSize: 9, fill: '#FFFFFF' }}
                     axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
@@ -576,6 +586,8 @@ const ActionsLayer = memo(function ActionsLayer({
 =======
 >>>>>>> debc9d9 (fix: improve the deplyment env variables and real time streaming by timeframe)
 
+    const ticks = useMemo(() => xTicks(xDomain), [xDomain]);
+
     return (
         <ResponsiveContainer width="100%" height={height} minWidth={0}>
             <ScatterChart margin={{ top: 5, right: 20, bottom: 20, left: 0 }}>
@@ -586,9 +598,13 @@ const ActionsLayer = memo(function ActionsLayer({
                     scale="time"
                     domain={xDomain}
 <<<<<<< HEAD
+<<<<<<< HEAD
                     ticks={ticks}
 =======
 >>>>>>> debc9d9 (fix: improve the deplyment env variables and real time streaming by timeframe)
+=======
+                    ticks={ticks}
+>>>>>>> 002a518 (feat: Use new models more powerful)
                     tickFormatter={(v) => formatTimestamp(v, granularity)}
                     tick={{ fontSize: 9, fill: '#FFFFFF' }}
                     axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
