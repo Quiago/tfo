@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { discoverConnector, readConnectorBatch } from '@/lib/services/connector.service';
+import { getTelemetryTimeline } from '@/lib/services/telemetry.service';
 import { ApiError } from '@/lib/services/backend';
 import type {
     EnergyReading,
@@ -269,6 +270,29 @@ export function useConnectorTimeline(
             }
 
             if (cancelled) return;
+
+            // Pre-populate buffer with stored telemetry history so the chart
+            // isn't empty on first render.  Non-fatal: live data fills in anyway.
+            try {
+                const history = await getTelemetryTimeline(10);
+                if (!cancelled && history.length > 0) {
+                    const seeded: SensorReading[] = history.map((p) => ({
+                        timestamp:  p.timestamp,
+                        temperature: p.temperature,
+                        vibration:   p.vibration,
+                        pressure:    p.pressure,
+                        humidity:    p.humidity,
+                        anomaly:     false,
+                        alertLevel:  'none' as const,
+                    }));
+                    setSensorBuffer(seeded.slice(-MAX_BUFFER));
+                    bufferRef.current = seeded.slice(-MAX_BUFFER);
+                    console.log('[Connector] Pre-populated buffer with', seeded.length, 'telemetry readings');
+                }
+            } catch {
+                // Non-fatal — live polling will populate the buffer
+            }
+
             connectedRef.current = true;
             setStatus('connected');
         }

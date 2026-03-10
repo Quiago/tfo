@@ -72,6 +72,99 @@ async def _search_knowledge_base(query: str, session: Session, **_) -> str:
         return f"Error searching knowledge base: {exc}"
 
 
+async def _get_latest_readings(session: Session, signal_ids: str | None = None, **_) -> str:
+    """
+    Returns the latest stored value for each tracked sensor signal.
+    signal_ids: optional comma-separated list of signal IDs to filter.
+    """
+    try:
+        from app.api.v1.telemetry import service as telemetry_service
+        ids = [s.strip() for s in signal_ids.split(",")] if signal_ids else None
+        readings = telemetry_service.get_latest_readings(session, ids)
+        if not readings:
+            return "No telemetry readings available. The simulator may not be running yet."
+        return json.dumps(
+            [
+                {
+                    "signal_id": r.signal_id,
+                    "display_name": r.display_name,
+                    "value": r.value,
+                    "unit": r.unit,
+                    "recorded_at": r.recorded_at.isoformat(),
+                }
+                for r in readings
+            ],
+            ensure_ascii=False,
+        )
+    except Exception as exc:
+        logger.warning("tool_get_latest_readings_error", extra={"error": str(exc)}, exc_info=True)
+        return f"Error retrieving latest readings: {exc}"
+
+
+async def _query_time_range(
+    session: Session,
+    signal_ids: str = "",
+    minutes: int = 60,
+    **_,
+) -> str:
+    """
+    Returns historical readings for specified signals over the last N minutes.
+    signal_ids: comma-separated signal IDs (e.g. 'zone1_temperature,total_power').
+    minutes: time window (1–1440).
+    """
+    try:
+        from app.api.v1.telemetry import service as telemetry_service
+        ids = [s.strip() for s in signal_ids.split(",") if s.strip()]
+        if not ids:
+            return "Provide at least one signal_id. Use get_latest_readings() first to see available signals."
+        minutes = max(1, min(1440, int(minutes)))
+        readings = telemetry_service.query_time_range(session, ids, minutes)
+        if not readings:
+            return f"No readings found for {ids} in the last {minutes} minutes."
+        # Group by signal for compact output
+        from collections import defaultdict
+        groups: dict[str, list[dict]] = defaultdict(list)
+        for r in readings:
+            groups[r.signal_id].append({
+                "ts": r.recorded_at.isoformat(),
+                "value": r.value,
+                "unit": r.unit,
+            })
+        return json.dumps(
+            {"window_minutes": minutes, "signals": dict(groups)},
+            ensure_ascii=False,
+        )
+    except Exception as exc:
+        logger.warning("tool_query_time_range_error", extra={"error": str(exc)}, exc_info=True)
+        return f"Error querying time range: {exc}"
+
+
+async def _get_sensor_statistics(
+    session: Session,
+    signal_ids: str = "",
+    minutes: int = 60,
+    **_,
+) -> str:
+    """
+    Returns min/max/avg/count statistics for specified signals over a time window.
+    signal_ids: comma-separated signal IDs.
+    minutes: time window (1–1440).
+    """
+    try:
+        from app.api.v1.telemetry import service as telemetry_service
+        ids = [s.strip() for s in signal_ids.split(",") if s.strip()]
+        if not ids:
+            return "Provide at least one signal_id."
+        minutes = max(1, min(1440, int(minutes)))
+        stats = telemetry_service.get_statistics(session, ids, minutes)
+        if not stats:
+            return f"No statistics found for {ids} in the last {minutes} minutes."
+        return json.dumps({"window_minutes": minutes, "stats": stats}, ensure_ascii=False)
+    except Exception as exc:
+        logger.warning("tool_get_sensor_statistics_error", extra={"error": str(exc)}, exc_info=True)
+        return f"Error retrieving sensor statistics: {exc}"
+
+
 async def _write_asset_property(asset_id: str, property_name: str, value: Any, session: Session, **_) -> str:
     try:
         await asset_service.write_property(asset_id, property_name, value, session)
@@ -87,6 +180,9 @@ _TOOL_REGISTRY: dict[str, Any] = {
     "read_all_asset_properties": _read_all_asset_properties,
     "write_asset_property": _write_asset_property,
     "search_knowledge_base": _search_knowledge_base,
+    "get_latest_readings": _get_latest_readings,
+    "query_time_range": _query_time_range,
+    "get_sensor_statistics": _get_sensor_statistics,
 }
 
 
@@ -139,6 +235,71 @@ TOOL_SCHEMAS: list[dict] = [
                 "query": {"type": "string", "description": "The search query in natural language (e.g. 'pump startup procedure', 'safety protocol for tank overflow')"},
             },
             "required": ["query"],
+        },
+    },
+    {
+        "name": "get_latest_readings",
+        "description": (
+            "Get the latest stored sensor value for each tracked signal from the factory simulator. "
+            "Use this for questions like 'what is the current temperature?', 'show me current power consumption', "
+            "'what are the robots doing right now?'. Returns real values from the database."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "signal_ids": {
+                    "type": "string",
+                    "description": (
+                        "Optional comma-separated signal IDs to filter (e.g. 'zone1_temperature,total_power'). "
+                        "Omit to get all available signals."
+                    ),
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "query_time_range",
+        "description": (
+            "Query historical sensor readings for specific signals over a time window. "
+            "Use this for trend analysis: 'how has the temperature changed in the last hour?', "
+            "'show power consumption over the last 30 minutes', 'is the vibration increasing?'"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "signal_ids": {
+                    "type": "string",
+                    "description": "Comma-separated signal IDs (e.g. 'zone1_temperature,vibration_x')",
+                },
+                "minutes": {
+                    "type": "integer",
+                    "description": "Time window in minutes (1–1440). Default: 60.",
+                },
+            },
+            "required": ["signal_ids"],
+        },
+    },
+    {
+        "name": "get_sensor_statistics",
+        "description": (
+            "Get aggregated statistics (min, max, average, count, last value) for sensor signals over a time window. "
+            "Use this for questions like 'what was the peak temperature today?', "
+            "'average power consumption last hour', 'min/max vibration in the last 24h'."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "signal_ids": {
+                    "type": "string",
+                    "description": "Comma-separated signal IDs (e.g. 'zone1_temperature,total_power')",
+                },
+                "minutes": {
+                    "type": "integer",
+                    "description": "Time window in minutes (1–1440). Default: 60.",
+                },
+            },
+            "required": ["signal_ids"],
         },
     },
     {

@@ -18,11 +18,12 @@ if multiprocessing.get_start_method(allow_none=True) != "spawn":
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlmodel import Session
+from sqlmodel import Session, Session as SQLModelSession
 
 from app.api.v1.router import api_router
 from app.api.v1.llms import service as llm_service
 from app.api.v1.assets.service import auto_import_assets
+from app.api.v1.telemetry.service import TelemetryPoller
 from app.core.logging import setup_logging
 from app.db.engine import create_db_and_tables, engine as db_engine
 from app.core.config import settings
@@ -32,6 +33,10 @@ from app.core.config import settings
 async def lifespan(app: FastAPI):
     setup_logging()
     create_db_and_tables()
+
+    # Start telemetry poller (polls simulator REST API every 5s, stores in DB)
+    poller = TelemetryPoller(session_factory=lambda: SQLModelSession(db_engine))
+    poller.start()
 
     async def _startup():
         # 1. Download + load priority model into RAM.
@@ -44,7 +49,8 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # On shutdown: cancel startup if still in progress, then wait cleanly.
+    # On shutdown: stop poller, cancel startup if still in progress, then wait cleanly.
+    poller.stop()
     startup_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await startup_task

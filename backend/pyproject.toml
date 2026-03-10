@@ -20,4 +20,5 @@ dependencies = [
     "striprtf>=0.0.29",
     "ebooklib>=0.20",
     "sentence-transformers>=5.2.3",
+    "httpx>=0.28.0",
 ]
