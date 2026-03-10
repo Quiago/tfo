@@ -1,59 +1,102 @@
 """
 telemetry/service.py — Background poller + query helpers.
 
-TelemetryPoller
-  Runs as an asyncio background task (started from app lifespan).
-  Every POLL_INTERVAL seconds it calls the simulator's REST /api/snapshot,
-  flattens the nested JSON into individual signal readings, and persists them.
-  Old readings beyond RETENTION_HOURS are pruned in the same poll cycle.
+Architecture
+────────────
+The TelemetryPoller is the bridge between the connector layer and the DB:
 
-Query helpers (synchronous, called by router + AI tools)
-  get_latest_readings   — latest value per signal
-  query_time_range      — all readings in a sliding time window
-  get_statistics        — min / max / avg / count / last per signal
-  get_timeline_history  — 4-channel normalized output for the frontend chart
+  Simulator OPC UA
+       │
+       └── OPC UA Connector (registered in DB)
+               │
+               ├── Frontend (live, 2 s): /connectors/{id}/read-batch
+               │
+               └── TelemetryPoller (5 s): connector_service.read_batch()
+                       │
+                       └── telemetry_reading table
+                               │
+                               ├── /telemetry/timeline  → frontend history seed
+                               └── AI tools (get_latest_readings, etc.)
+
+The poller uses the existing connector_service.read_batch() so there is ONE
+connection path to the simulator — the OPC UA connector already configured by
+the operator.  It never calls the simulator REST API directly.
+
+Signal mapping
+────────────────
+OPC UA nodes have display_names like "Zone1Temperature", "Speed", "Load".
+_node_to_signal() maps them to our signal catalog IDs using two lookup tables:
+  _NODE_INFO      — direct display_name → (signal_id, human_name, unit)
+  _ROBOT_FIELDS   — robot sub-fields by display_name (path[-2] gives robot number)
+
+Nodes that should be skipped (Energy/Robot{N}Power duplicates, string Status)
+return None from _node_to_signal() and are not stored.
+
+Configuration (env vars)
+────────────────────────
+  TELEMETRY_CONNECTOR_ID   ID of the OPC UA connector to poll.
+                           If unset, the poller auto-detects the first active
+                           OPC UA connector in DB.
+  TELEMETRY_POLL_INTERVAL  Seconds between polls (default: 5).
+  TELEMETRY_RETENTION_HOURS How many hours of readings to keep (default: 24).
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
+import re
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 
-import httpx
 from sqlmodel import Session, col, func, select
 
+from app.api.v1.connectors.backends.base import NodeInfo
 from app.api.v1.telemetry.models import TelemetryReading
 
 logger = logging.getLogger(__name__)
 
-SIMULATED_DATA_URL  = os.getenv("SIMULATED_DATA_URL", "http://localhost:8001")
-POLL_INTERVAL       = int(os.getenv("TELEMETRY_POLL_INTERVAL", "5"))    # seconds
-RETENTION_HOURS     = int(os.getenv("TELEMETRY_RETENTION_HOURS", "24"))
-CONNECTOR_ID        = "simulated-factory"
+POLL_INTERVAL     = int(os.getenv("TELEMETRY_POLL_INTERVAL", "5"))     # seconds
+RETENTION_HOURS   = int(os.getenv("TELEMETRY_RETENTION_HOURS", "24"))
+_CONNECTOR_ID_ENV = os.getenv("TELEMETRY_CONNECTOR_ID", "")
 
-# ── Signal map: (snapshot_group, snapshot_key) → (signal_id, display_name, unit)
-_SIGNAL_MAP: dict[tuple[str, str], tuple[str, str, str]] = {
-    ("sensors", "ambient_temperature"): ("ambient_temperature", "Ambient Temperature", "°C"),
-    ("sensors", "zone1_temperature"):   ("zone1_temperature",   "Zone 1 Temperature",  "°C"),
-    ("sensors", "zone2_temperature"):   ("zone2_temperature",   "Zone 2 Temperature",  "°C"),
-    ("sensors", "vibration_x"):         ("vibration_x",         "Vibration X",         "mm/s"),
-    ("sensors", "vibration_y"):         ("vibration_y",         "Vibration Y",         "mm/s"),
-    ("sensors", "vibration_z"):         ("vibration_z",         "Vibration Z",         "mm/s"),
-    ("sensors", "humidity"):            ("humidity",            "Humidity",            "%"),
-    ("sensors", "line_pressure"):       ("line_pressure",       "Line Pressure",       "bar"),
-    ("production", "parts_assembled"):  ("parts_assembled",     "Parts Assembled",     "pcs"),
-    ("production", "cycle_time"):       ("cycle_time",          "Cycle Time",          "s"),
-    ("production", "throughput"):       ("throughput",          "Throughput",          "pph"),
-    ("production", "defect_rate"):      ("defect_rate",         "Defect Rate",         "%"),
-    ("production", "yield_rate"):       ("yield_rate",          "Yield Rate",          "%"),
-    ("energy", "total_power_kw"):       ("total_power",         "Total Power",         "kW"),
-    ("energy", "aux_power_kw"):         ("aux_power",           "Aux Power",           "kW"),
-    ("energy", "power_factor"):         ("power_factor",        "Power Factor",        ""),
-    ("energy", "grid_frequency_hz"):    ("grid_frequency",      "Grid Frequency",      "Hz"),
-    ("energy", "energy_today_kwh"):     ("energy_today",        "Energy Today",        "kWh"),
+# Virtual connector_id stored in DB rows when reading via OPC UA connector.
+# Matches whatever connector_id the user configured.  Stored per-reading so
+# we can support multiple connectors in the future.
+CONNECTOR_ID_DEFAULT = "simulated-factory"
+
+# ── OPC UA display_name → (signal_id, human_label, unit) ─────────────────────
+_NODE_INFO: dict[str, tuple[str, str, str]] = {
+    "AmbientTemperature": ("ambient_temperature", "Ambient Temperature", "°C"),
+    "Zone1Temperature":   ("zone1_temperature",   "Zone 1 Temperature",  "°C"),
+    "Zone2Temperature":   ("zone2_temperature",   "Zone 2 Temperature",  "°C"),
+    "Vibration_X":        ("vibration_x",         "Vibration X",         "mm/s"),
+    "Vibration_Y":        ("vibration_y",         "Vibration Y",         "mm/s"),
+    "Vibration_Z":        ("vibration_z",         "Vibration Z",         "mm/s"),
+    "Humidity":           ("humidity",            "Humidity",            "%"),
+    "LinePressure":       ("line_pressure",       "Line Pressure",       "bar"),
+    "PartsAssembled":     ("parts_assembled",     "Parts Assembled",     "pcs"),
+    "CycleTime":          ("cycle_time",          "Cycle Time",          "s"),
+    "Throughput":         ("throughput",          "Throughput",          "pph"),
+    "DefectRate":         ("defect_rate",         "Defect Rate",         "%"),
+    "YieldRate":          ("yield_rate",          "Yield Rate",          "%"),
+    "TotalPower":         ("total_power",         "Total Power",         "kW"),
+    "AuxPower":           ("aux_power",           "Aux Power",           "kW"),
+    "PowerFactor":        ("power_factor",        "Power Factor",        ""),
+    "GridFrequency":      ("grid_frequency",      "Grid Frequency",      "Hz"),
+    "EnergyTodayKWh":     ("energy_today",        "Energy Today",        "kWh"),
 }
+
+# Robot variable display_names (path[-2] = "Robot{N}" identifies the robot)
+_ROBOT_FIELDS: dict[str, tuple[str, str, str]] = {
+    "Speed":            ("speed",      "Speed",             "%"),
+    "JointTemperature": ("joint_temp", "Joint Temperature", "°C"),
+    "Load":             ("load",       "Load",              "Nm"),
+    "Power":            ("power",      "Power",             "kW"),
+    # "Status" is a string — deliberately excluded (not numeric)
+}
+
+_ROBOT_RE = re.compile(r"^Robot(\d+)$")
 
 # ── Frontend 4-channel mapping: chart field → signal_id ──────────────────────
 TIMELINE_FIELD_MAP: dict[str, str] = {
@@ -64,43 +107,30 @@ TIMELINE_FIELD_MAP: dict[str, str] = {
 }
 
 
-def _flatten_snapshot(snapshot: dict) -> list[tuple[str, str, str, float]]:
+def _node_to_signal(node: NodeInfo) -> tuple[str, str, str] | None:
     """
-    Returns [(signal_id, display_name, unit, value), …] for every known signal.
-    Robot sub-signals are extracted from production.robots.{1..4}.
+    Map one OPC UA NodeInfo to (signal_id, display_name, unit).
+    Returns None for nodes that should be skipped (string tags, energy duplicates).
     """
-    results: list[tuple[str, str, str, float]] = []
+    name = node.display_name
 
-    for (group, key), (sig_id, name, unit) in _SIGNAL_MAP.items():
-        val = snapshot.get(group, {}).get(key)
-        if val is not None:
-            try:
-                results.append((sig_id, name, unit, float(val)))
-            except (TypeError, ValueError):
-                pass
+    # Direct match (sensors, production KPIs, energy totals)
+    if name in _NODE_INFO:
+        return _NODE_INFO[name]
 
-    robots = snapshot.get("production", {}).get("robots", {})
-    for robot_id, rdata in robots.items():
-        for field, label, unit in [
-            ("speed",             "Speed",             "%"),
-            ("joint_temperature", "Joint Temperature", "°C"),
-            ("load",              "Load",              "Nm"),
-            ("power_kw",          "Power",             "kW"),
-        ]:
-            val = rdata.get(field)
-            if val is not None:
-                try:
-                    norm_field = field.replace("joint_temperature", "joint_temp").replace("_kw", "")
-                    results.append((
-                        f"robot{robot_id}_{norm_field}",
-                        f"Robot {robot_id} {label}",
-                        unit,
-                        float(val),
-                    ))
-                except (TypeError, ValueError):
-                    pass
+    # Robot variables under AssemblyLine: path[-2] = "Robot{N}"
+    if name in _ROBOT_FIELDS and len(node.path) >= 2:
+        m = _ROBOT_RE.match(node.path[-2])
+        if m:
+            robot_id = m.group(1)
+            field_id, field_name, unit = _ROBOT_FIELDS[name]
+            return (f"robot{robot_id}_{field_id}", f"Robot {robot_id} {field_name}", unit)
 
-    return results
+    # Everything else is skipped:
+    #   - Energy/Robot{N}Power (duplicate of AssemblyLine robot power)
+    #   - Status strings
+    #   - OPC UA metadata nodes
+    return None
 
 
 # ── Poller ────────────────────────────────────────────────────────────────────
@@ -109,56 +139,143 @@ class TelemetryPoller:
     """
     Background asyncio task.  Call start() once from the app lifespan.
 
-    Uses a session_factory (callable → Session) so it can open short-lived
-    DB sessions per poll cycle without holding a connection open permanently.
+    Uses session_factory (callable → Session) to open short-lived DB sessions
+    per poll cycle.  Connector reads go through the existing connector_service
+    dispatch so the OPC UA connector is the single source of truth.
     """
 
     def __init__(self, session_factory) -> None:
         self._session_factory = session_factory
         self._task: asyncio.Task | None = None
+        self._connector_id: str | None = None
+        # node_id → (signal_id, display_name, unit) built after first discovery
+        self._node_map: dict[str, tuple[str, str, str]] = {}
 
     def start(self) -> None:
         self._task = asyncio.create_task(self._run(), name="telemetry-poller")
-        logger.info(
-            "[Telemetry] Poller started — interval=%ds  source=%s",
-            POLL_INTERVAL, SIMULATED_DATA_URL,
-        )
+        logger.info("[Telemetry] Poller started — interval=%ds", POLL_INTERVAL)
 
     def stop(self) -> None:
         if self._task:
             self._task.cancel()
 
-    async def _run(self) -> None:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            while True:
-                try:
-                    await self._poll_once(client)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    logger.debug("[Telemetry] poll error: %s", exc)
-                await asyncio.sleep(POLL_INTERVAL)
+    async def _resolve_connector_id(self) -> str | None:
+        """Find the connector_id to poll: env var → first active OPC UA connector in DB."""
+        if _CONNECTOR_ID_ENV:
+            return _CONNECTOR_ID_ENV
 
-    async def _poll_once(self, client: httpx.AsyncClient) -> None:
-        resp = await client.get(f"{SIMULATED_DATA_URL}/api/snapshot")
-        resp.raise_for_status()
-        signals = _flatten_snapshot(resp.json())
-        now = datetime.now(UTC)
-
+        from app.api.v1.connectors.models import Connector, ConnectorType
         with self._session_factory() as session:
-            for sig_id, name, unit, value in signals:
+            stmt = select(Connector).where(
+                Connector.type == ConnectorType.opcua,
+                Connector.is_active == True,  # noqa: E712
+            )
+            connector = session.exec(stmt).first()
+            if connector:
+                return connector.id
+
+        logger.warning(
+            "[Telemetry] No active OPC UA connector found. "
+            "Set TELEMETRY_CONNECTOR_ID or register an OPC UA connector to start polling."
+        )
+        return None
+
+    async def _ensure_node_map(self, connector_id: str) -> bool:
+        """
+        Discover all OPC UA nodes and build the node_id → signal_info map.
+        Returns True if the map was successfully built.
+        Uses the cached discovery result (5-min TTL) — not a network call every poll.
+        """
+        if self._node_map:
+            return True
+
+        try:
+            from app.api.v1.connectors import service as connector_service
+            with self._session_factory() as session:
+                result = await connector_service.discover(connector_id, session)
+
+            self._node_map = {}
+            for node in result.nodes:
+                sig = _node_to_signal(node)
+                if sig:
+                    self._node_map[node.node_id] = sig
+
+            logger.info(
+                "[Telemetry] Node map built — %d/%d nodes mapped to signals",
+                len(self._node_map), result.node_count,
+            )
+            return bool(self._node_map)
+        except Exception as exc:
+            logger.debug("[Telemetry] Discovery failed: %s", exc)
+            return False
+
+    async def _run(self) -> None:
+        while True:
+            try:
+                await self._poll_cycle()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.debug("[Telemetry] poll error: %s", exc)
+            await asyncio.sleep(POLL_INTERVAL)
+
+    async def _poll_cycle(self) -> None:
+        # Resolve which connector to use (cached after first success)
+        if self._connector_id is None:
+            self._connector_id = await self._resolve_connector_id()
+            if self._connector_id is None:
+                return  # retry next cycle
+
+        # Build or refresh node map (cached after first discovery)
+        ok = await self._ensure_node_map(self._connector_id)
+        if not ok:
+            self._node_map = {}   # force re-discovery next cycle
+            return
+
+        # Read all mapped nodes in one batch
+        node_ids = list(self._node_map.keys())
+        try:
+            from app.api.v1.connectors import service as connector_service
+            with self._session_factory() as session:
+                batch = await connector_service.read_batch(self._connector_id, node_ids, session)
+        except Exception as exc:
+            logger.debug("[Telemetry] read_batch failed: %s — will rediscover", exc)
+            self._node_map = {}  # force rediscovery (server may have restarted)
+            return
+
+        # Persist readings
+        now = datetime.now(UTC)
+        stored = 0
+        with self._session_factory() as session:
+            for item in batch:
+                if "error" in item:
+                    continue
+                sig = self._node_map.get(item["node_id"])
+                if sig is None:
+                    continue
+                raw = item.get("value")
+                if raw is None:
+                    continue
+                try:
+                    value = float(raw)
+                except (TypeError, ValueError):
+                    continue
+
+                signal_id, display_name, unit = sig
                 session.add(TelemetryReading(
-                    connector_id=CONNECTOR_ID,
-                    signal_id=sig_id,
-                    display_name=name,
+                    connector_id=self._connector_id,
+                    signal_id=signal_id,
+                    display_name=display_name,
                     value=value,
                     unit=unit,
                     recorded_at=now,
                 ))
-            session.commit()
-            logger.debug("[Telemetry] Stored %d readings at %s", len(signals), now.isoformat())
+                stored += 1
 
-            # Prune readings beyond retention window
+            session.commit()
+            logger.debug("[Telemetry] Stored %d readings at %s", stored, now.isoformat())
+
+            # Prune old data
             cutoff = now - timedelta(hours=RETENTION_HOURS)
             old = session.exec(
                 select(TelemetryReading).where(TelemetryReading.recorded_at < cutoff)
@@ -175,16 +292,15 @@ class TelemetryPoller:
 def get_latest_readings(
     session: Session,
     signal_ids: list[str] | None = None,
-    connector_id: str = CONNECTOR_ID,
+    connector_id: str | None = None,
 ) -> list[TelemetryReading]:
     """Latest value per signal_id (subquery join on max recorded_at)."""
-    subq = (
-        select(
-            TelemetryReading.signal_id,
-            func.max(TelemetryReading.recorded_at).label("max_at"),
-        )
-        .where(TelemetryReading.connector_id == connector_id)
+    subq = select(
+        TelemetryReading.signal_id,
+        func.max(TelemetryReading.recorded_at).label("max_at"),
     )
+    if connector_id:
+        subq = subq.where(TelemetryReading.connector_id == connector_id)
     if signal_ids:
         subq = subq.where(col(TelemetryReading.signal_id).in_(signal_ids))
     subq = subq.group_by(TelemetryReading.signal_id).subquery()
@@ -201,25 +317,25 @@ def query_time_range(
     session: Session,
     signal_ids: list[str],
     minutes: int = 60,
-    connector_id: str = CONNECTOR_ID,
+    connector_id: str | None = None,
 ) -> list[TelemetryReading]:
     """All readings for the given signals in the last N minutes, ordered by time."""
     cutoff = datetime.now(UTC) - timedelta(minutes=minutes)
     stmt = (
         select(TelemetryReading)
-        .where(TelemetryReading.connector_id == connector_id)
         .where(col(TelemetryReading.signal_id).in_(signal_ids))
         .where(TelemetryReading.recorded_at >= cutoff)
-        .order_by(TelemetryReading.recorded_at)
     )
-    return list(session.exec(stmt).all())
+    if connector_id:
+        stmt = stmt.where(TelemetryReading.connector_id == connector_id)
+    return list(session.exec(stmt.order_by(TelemetryReading.recorded_at)).all())
 
 
 def get_statistics(
     session: Session,
     signal_ids: list[str],
     minutes: int = 60,
-    connector_id: str = CONNECTOR_ID,
+    connector_id: str | None = None,
 ) -> list[dict]:
     """Aggregated stats (min/max/avg/count/last) per signal over a sliding window."""
     cutoff = datetime.now(UTC) - timedelta(minutes=minutes)
@@ -233,7 +349,6 @@ def get_statistics(
             func.max(TelemetryReading.value).label("max_v"),
             func.avg(TelemetryReading.value).label("avg_v"),
         )
-        .where(TelemetryReading.connector_id == connector_id)
         .where(col(TelemetryReading.signal_id).in_(signal_ids))
         .where(TelemetryReading.recorded_at >= cutoff)
         .group_by(
@@ -242,6 +357,8 @@ def get_statistics(
             TelemetryReading.unit,
         )
     )
+    if connector_id:
+        stmt = stmt.where(TelemetryReading.connector_id == connector_id)
     rows = session.exec(stmt).all()
     latest = {r.signal_id: r.value for r in get_latest_readings(session, signal_ids, connector_id)}
 
@@ -263,20 +380,19 @@ def get_statistics(
 def get_timeline_history(
     session: Session,
     minutes: int = 10,
-    connector_id: str = CONNECTOR_ID,
+    connector_id: str | None = None,
 ) -> list[dict]:
     """
     Pre-computed 4-channel timeline for the frontend chart.
 
     Reads the last `minutes` of raw data for temperature / vibration /
     pressure / humidity signals, buckets readings by poll cycle, then
-    normalises each channel to 0–100 using the window min/max — exactly
-    matching the normalisation the frontend hook applies to live readings.
+    normalises each channel to 0–100 using the window min/max — identical
+    normalisation to what the frontend hook applies to live readings.
     """
     signal_ids = list(TIMELINE_FIELD_MAP.values())
     readings = query_time_range(session, signal_ids, minutes, connector_id)
 
-    # Bucket by poll interval so co-polled readings land in the same point
     bucket_ms = POLL_INTERVAL * 1000
     buckets: dict[int, dict[str, float]] = defaultdict(dict)
     for r in readings:
@@ -284,7 +400,6 @@ def get_timeline_history(
         key = (ts_ms // bucket_ms) * bucket_ms
         buckets[key][r.signal_id] = r.value
 
-    # Collect all values per field for normalization
     field_vals: dict[str, list[float]] = {f: [] for f in TIMELINE_FIELD_MAP}
     for bucket in buckets.values():
         for field, sig_id in TIMELINE_FIELD_MAP.items():
