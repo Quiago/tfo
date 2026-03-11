@@ -98,9 +98,19 @@ function saveMappings(connectorId: string, mappings: NodeMapping[]): void {
 
 // ─── NORMALIZATION ────────────────────────────────────────────────────────────
 //
-// Maps each channel's raw value to 0–100 relative to its own recent min/max.
-// Static values (spread ≈ 0) map to 50 so they appear centered, not at a flat 0.
-// With real industrial sensors each channel will follow its own independent curve.
+// Maps each channel's raw engineering value to 0–100 relative to its OWN
+// recent raw min/max. Using raw history (not normalized history) ensures:
+//  - Each channel is normalised against its own physical scale (°C, mm/s, bar)
+//  - Channels diverge visually because their raw ranges differ
+//  - Static values (spread ≈ 0) map to 50 (centered, not clipped to 0)
+
+// Which raw field to use for normalization history of each channel
+const RAW_HISTORY_FIELD: Record<MappedField, 'rawTemperature' | 'rawVibration' | 'rawPressure' | 'rawHumidity'> = {
+    temperature: 'rawTemperature',
+    vibration:   'rawVibration',
+    pressure:    'rawPressure',
+    humidity:    'rawHumidity',
+};
 
 function windowNormalize(
     raw: number,
@@ -108,8 +118,13 @@ function windowNormalize(
     history: SensorReading[],
 ): number {
     if (history.length < 2) return 50;
-    const win  = history.slice(-NORMALIZE_WINDOW);
-    const vals = win.map((s) => s[field] as number).filter(isFinite);
+    const win      = history.slice(-NORMALIZE_WINDOW);
+    const rawField = RAW_HISTORY_FIELD[field];
+    // Use raw engineering values from history so each channel normalises
+    // against its own physical scale — not the previous normalised 0-100 values.
+    const vals = win
+        .map((s) => s[rawField] as number | null)
+        .filter((v): v is number => v != null && isFinite(v));
     if (vals.length < 2) return 50;
     const min    = Math.min(...vals);
     const max    = Math.max(...vals);

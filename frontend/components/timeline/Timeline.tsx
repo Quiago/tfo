@@ -1,6 +1,7 @@
 'use client';
 
 import { useConnectorTimeline, type ConnectorStatus, type NodeMapping } from '@/lib/hooks/useConnectorTimeline';
+import { useTimelineStore } from '@/lib/store/timeline-store';
 import type { SignalMeta } from '@/lib/types/timeline';
 import { ConnectorModal } from './ConnectorModal';
 import type {
@@ -853,7 +854,22 @@ interface MultiLayerTimelineProps {
 }
 
 export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, connectorId: connectorIdProp }: MultiLayerTimelineProps) {
-    const [granularity, setGranularity] = useState<TimeGranularity>('Day');
+    // Persisted across reloads — user never has to re-select the connector
+    const {
+        activeConnectorId: storedConnectorId,
+        setActiveConnectorId: persistConnectorId,
+        granularity,
+        setGranularity,
+    } = useTimelineStore();
+
+    // Prop takes priority (e.g. Overview expand view passing a specific connector);
+    // otherwise fall back to whatever the user last connected to.
+    const activeConnectorId = connectorIdProp ?? storedConnectorId;
+    const setActiveConnectorId = useCallback(
+        (id: string | undefined) => persistConnectorId(id),
+        [persistConnectorId],
+    );
+
     const [expandedLayer, setExpandedLayer] = useState<string | null>(null);
     const [visibleSensors, setVisibleSensors] = useState<Record<string, boolean>>({
         vibration: true,
@@ -863,8 +879,6 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
         pressure: false,
     });
 
-    // Active connector — can be set via prop (initial) or by the user through the modal
-    const [activeConnectorId, setActiveConnectorId] = useState<string | undefined>(connectorIdProp);
     const [modalOpen, setModalOpen] = useState(false);
 
     // Effect to handle auto-trigger from parent
