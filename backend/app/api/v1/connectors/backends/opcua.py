@@ -67,6 +67,7 @@ Fundamento para MCP:
 """
 import asyncio
 import logging
+from dataclasses import dataclass, field
 from typing import Any
 
 from asyncua import Client, Node, ua
@@ -80,6 +81,47 @@ from app.api.v1.connectors.models import Connector
 logger = logging.getLogger(__name__)
 
 NodeId = str
+
+# ── Persistent connection pool ───────────────────────────────────────────────
+#
+# Problem: _get_backend() creates a new OPCUAConnector per HTTP request, and
+# each read_batch() was opening a new TCP session → connection storm on 2s polling.
+#
+# Fix: one long-lived asyncua.Client per connector_id, shared across all requests.
+# A per-connector asyncio.Lock serialises concurrent reads so the OPC UA server
+# never receives more than one session at a time from this backend.
+#
+# Reconnect logic:
+#   - First call: connect()
+#   - Any UaError / TimeoutError / OSError: mark disconnected, reconnect on next call
+#   - Graceful teardown: _pool is module-level; clients are closed when the process exits
+
+@dataclass
+class _PoolEntry:
+    client: Client
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    connected: bool = False
+
+
+# connector_id → _PoolEntry
+_pool: dict[str, _PoolEntry] = {}
+
+
+async def _get_or_connect(connector_id: str, endpoint: str, cfg: dict) -> _PoolEntry:
+    """Return the pool entry for this connector, connecting if necessary."""
+    if connector_id not in _pool:
+        _pool[connector_id] = _PoolEntry(client=_make_client(endpoint, cfg))
+    entry = _pool[connector_id]
+    if not entry.connected:
+        # Replace the client object in case the endpoint/cfg changed
+        entry.client = _make_client(endpoint, cfg)
+        await entry.client.connect()
+        entry.connected = True
+        logger.info(
+            "opcua_connected",
+            extra={"connector_id": connector_id, "endpoint": endpoint},
+        )
+    return entry
 
 
 def _to_json_safe(value: Any) -> Any:
@@ -187,31 +229,50 @@ class OPCUAConnector(ConnectorBackend):
 
     async def read_batch(self, node_ids: list[str]) -> list[dict]:
         """
-        Lee múltiples nodos en UNA SOLA sesión OPC-UA.
+        Lee múltiples nodos en UNA SOLA sesión OPC-UA persistente.
 
-        Reemplaza N llamadas individuales a read() (cada una abre su propia
-        sesión TCP) por una sola sesión que lee todos los nodos en secuencia.
-        Reduce latencia de O(N × RTT) a O(RTT + N × read_time).
+        Uses the module-level connection pool: one TCP session per connector_id,
+        reused across all polling calls. A per-connector asyncio.Lock prevents
+        concurrent reads from the same client (asyncua is not thread-safe).
 
         Devuelve una lista con un dict por node_id:
           éxito: { node_id, value, data_type, status, source_timestamp }
           error:  { node_id, error }
         """
-        results: list[dict] = []
-        async with _make_client(self.connector.endpoint, self._cfg) as client:
-            for node_id in node_ids:
-                try:
-                    node = client.get_node(node_id)
-                    dv: DataValue = await node.read_data_value()
-                    results.append({
-                        "node_id": node_id,
-                        "value": _to_json_safe(dv.Value.Value if dv.Value else None),
-                        "data_type": dv.Value.VariantType.name if dv.Value else None,
-                        "status": str(dv.StatusCode),
-                        "source_timestamp": dv.SourceTimestamp.isoformat() if dv.SourceTimestamp else None,
-                    })
-                except Exception as exc:
-                    results.append({"node_id": node_id, "error": str(exc)})
+        entry = await _get_or_connect(
+            self.connector.id, self.connector.endpoint, self._cfg
+        )
+        async with entry.lock:
+            results: list[dict] = []
+            try:
+                for node_id in node_ids:
+                    try:
+                        node = entry.client.get_node(node_id)
+                        dv: DataValue = await asyncio.wait_for(
+                            node.read_data_value(), timeout=4.0
+                        )
+                        results.append({
+                            "node_id": node_id,
+                            "value": _to_json_safe(dv.Value.Value if dv.Value else None),
+                            "data_type": dv.Value.VariantType.name if dv.Value else None,
+                            "status": str(dv.StatusCode),
+                            "source_timestamp": dv.SourceTimestamp.isoformat() if dv.SourceTimestamp else None,
+                        })
+                    except asyncio.TimeoutError:
+                        results.append({"node_id": node_id, "error": "read_timeout"})
+                    except Exception as exc:
+                        results.append({"node_id": node_id, "error": str(exc)})
+            except Exception:
+                # Any unhandled error (e.g. transport disconnect) → mark for reconnect
+                entry.connected = False
+                raise
+
+        # Log actual values so we can debug what each channel is reading
+        summary = {r["node_id"]: r.get("value", r.get("error")) for r in results}
+        logger.info(
+            "opcua_read_batch",
+            extra={"connector_id": self.connector.id, "values": summary},
+        )
         return results
 
     async def discover(self) -> DiscoveryResult:
@@ -384,16 +445,22 @@ class OPCUAConnector(ConnectorBackend):
         Verifica conectividad con el servidor OPC-UA.
         Lee el nodo estándar ServerStatus (ns=0;i=2256), presente en cualquier
         servidor OPC-UA compatible con la especificación.
+        Uses the pool so we don't open a new TCP connection just for health checks.
         """
         try:
-            async with _make_client(self.connector.endpoint, self._cfg) as client:
-                node = client.get_node("ns=0;i=2256")
-                await node.read_value()
+            entry = await _get_or_connect(
+                self.connector.id, self.connector.endpoint, self._cfg
+            )
+            async with entry.lock:
+                node = entry.client.get_node("ns=0;i=2256")
+                await asyncio.wait_for(node.read_value(), timeout=4.0)
                 return True
         except Exception as exc:
+            # Mark as disconnected so next call triggers reconnect
+            if self.connector.id in _pool:
+                _pool[self.connector.id].connected = False
             logger.warning(
-                "OPC-UA health check failed",
+                "opcua_health_check_failed",
                 extra={"connector_id": self.connector.id, "error": str(exc)},
-                exc_info=True,
             )
             return False
