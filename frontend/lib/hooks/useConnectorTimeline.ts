@@ -38,6 +38,23 @@ export interface NodeMapping {
     dataType: string;
 }
 
+// Maps a discovered OPC UA Energy node to an EnergyReading field.
+// scaleFactor: applied before storing — e.g. PowerFactor (0–1) × 100 → %
+interface EnergyNodeMapping {
+    field: 'powerDraw' | 'coolingLoad' | 'efficiency';
+    displayName: string;
+    nodeId: string;
+    scaleFactor: number;
+}
+
+// Which EnergyReading field each well-known energy display name maps to.
+// Names are matched case-insensitively against the OPC UA node's display_name.
+const ENERGY_DISPLAY_TO_FIELD: Record<string, Omit<EnergyNodeMapping, 'nodeId' | 'displayName'>> = {
+    'totalpower':  { field: 'powerDraw',   scaleFactor: 1 },
+    'auxpower':    { field: 'coolingLoad', scaleFactor: 1 },
+    'powerfactor': { field: 'efficiency',  scaleFactor: 100 },
+};
+
 // ─── GRANULARITY CONFIG ───────────────────────────────────────────────────────
 //
 // windowMs  = total time span shown on X-axis (like the "timeframe" in TradingView)
@@ -63,7 +80,7 @@ const MAX_CONSECUTIVE_ERRORS = 4;
 const NORMALIZE_WINDOW       = 60;      // readings used for rolling min/max per channel
 
 /** Remove readings older than `cutoffMs`. Assumes array is chronologically sorted. */
-export function pruneBuffer(buf: SensorReading[], cutoffMs: number): SensorReading[] {
+export function pruneBuffer<T extends { timestamp: number }>(buf: T[], cutoffMs: number): T[] {
     if (buf.length === 0) return buf;
     // Binary-search first index that's >= cutoff (faster than filter for large buffers)
     let lo = 0, hi = buf.length;
@@ -91,6 +108,23 @@ function loadCachedMappings(connectorId: string): NodeMapping[] | null {
 function saveMappings(connectorId: string, mappings: NodeMapping[]): void {
     try {
         localStorage.setItem(`node_mappings_${connectorId}`, JSON.stringify(mappings));
+    } catch {
+        // localStorage unavailable (SSR, private mode) — non-fatal
+    }
+}
+
+function loadCachedEnergyMappings(connectorId: string): EnergyNodeMapping[] | null {
+    try {
+        const raw = localStorage.getItem(`energy_mappings_${connectorId}`);
+        return raw ? (JSON.parse(raw) as EnergyNodeMapping[]) : null;
+    } catch {
+        return null;
+    }
+}
+
+function saveEnergyMappings(connectorId: string, mappings: EnergyNodeMapping[]): void {
+    try {
+        localStorage.setItem(`energy_mappings_${connectorId}`, JSON.stringify(mappings));
     } catch {
         // localStorage unavailable (SSR, private mode) — non-fatal
     }
@@ -200,10 +234,40 @@ function aggregateToBuckets(
         }));
 }
 
+function aggregateEnergyBuckets(
+    readings: EnergyReading[],
+    bucketMs: number,
+    windowStart: number,
+): EnergyReading[] {
+    const inWindow = readings.filter((r) => r.timestamp >= windowStart);
+    if (bucketMs === 0 || inWindow.length === 0) return inWindow;
+
+    const buckets = new Map<number, EnergyReading[]>();
+    for (const r of inWindow) {
+        const key = Math.floor(r.timestamp / bucketMs) * bucketMs;
+        if (!buckets.has(key)) buckets.set(key, []);
+        buckets.get(key)!.push(r);
+    }
+
+    return Array.from(buckets.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([key, group]) => ({
+            timestamp:   key + bucketMs / 2,
+            powerDraw:   Math.round(avgArr(group.map((r) => r.powerDraw))   * 10) / 10,
+            coolingLoad: Math.round(avgArr(group.map((r) => r.coolingLoad)) * 10) / 10,
+            efficiency:  Math.round(avgArr(group.map((r) => r.efficiency))  * 10) / 10,
+            costPerHour: Math.round(avgArr(group.map((r) => r.costPerHour)) * 100) / 100,
+        }));
+}
+
 // ─── DERIVED METRICS ─────────────────────────────────────────────────────────
 //
-// Exported so individual chart-layer components can derive their own data
-// locally without depending on the hook (useful for lightweight-charts adoption).
+// deriveEnergy: FALLBACK ONLY — used when the connector has no dedicated
+// Energy OPC UA nodes. When real energy nodes are present (e.g. Factory/Energy/
+// TotalPower, AuxPower, PowerFactor), the hook reads those directly and
+// this function is not called.
+//
+// Exported so tests can still validate the formula.
 
 export function deriveEnergy(s: SensorReading): EnergyReading {
     // powerDraw: driven by PRESSURE (compressors) + HUMIDITY (HVAC/cooling),
@@ -239,14 +303,19 @@ export function useConnectorTimeline(
     const [nodeMappings, setNodeMappings]  = useState<NodeMapping[]>([]);
     const [signalMeta, setSignalMeta]      = useState<SignalMeta[]>([]);
     const [sensorBuffer, setSensorBuffer]  = useState<SensorReading[]>([]);
+    const [energyBuffer, setEnergyBuffer]  = useState<EnergyReading[]>([]);
 
     const nodeIdsRef           = useRef<string[]>([]);
+    const energyMappingsRef    = useRef<EnergyNodeMapping[]>([]);
     const connectedRef         = useRef(false);
     const consecutiveErrorsRef = useRef(0);
     const prevRawRef           = useRef<Partial<Record<MappedField, number>>>({});
+    const prevEnergyRef        = useRef<Partial<Record<EnergyNodeMapping['field'], number>>>({});
     const bufferRef            = useRef<SensorReading[]>([]);
+    const energyBufferRef      = useRef<EnergyReading[]>([]);
 
     useEffect(() => { bufferRef.current = sensorBuffer; }, [sensorBuffer]);
+    useEffect(() => { energyBufferRef.current = energyBuffer; }, [energyBuffer]);
 
     // ── Discovery ─────────────────────────────────────────────────────────────
     useEffect(() => {
@@ -254,7 +323,9 @@ export function useConnectorTimeline(
             setStatus('idle');
             setNodeMappings([]);
             setSensorBuffer([]);
+            setEnergyBuffer([]);
             nodeIdsRef.current = [];
+            energyMappingsRef.current = [];
             connectedRef.current = false;
             return;
         }
@@ -264,19 +335,28 @@ export function useConnectorTimeline(
         setNodeMappings([]);
         setSignalMeta([]);
         setSensorBuffer([]);
+        setEnergyBuffer([]);
         connectedRef.current = false;
         consecutiveErrorsRef.current = 0;
         prevRawRef.current = {};
+        prevEnergyRef.current = {};
         let cancelled = false;
 
         async function init() {
-            // ── Node mapping: use localStorage cache to skip re-discovery ──────
+            // ── Sensor node mapping: use localStorage cache to skip re-discovery ──
             const cached = loadCachedMappings(connectorId!);
+            const cachedEnergy = loadCachedEnergyMappings(connectorId!);
+
             if (cached && cached.length > 0) {
                 // Connector was used before — reuse known node IDs
                 nodeIdsRef.current = cached.map((m) => m.nodeId);
                 setNodeMappings(cached);
-                console.log('[Connector] Using cached node mappings for', connectorId, '— skipping discovery');
+                console.log('[Connector] Using cached sensor mappings for', connectorId);
+
+                if (cachedEnergy && cachedEnergy.length > 0) {
+                    energyMappingsRef.current = cachedEnergy;
+                    console.log('[Connector] Using cached energy mappings:', cachedEnergy.map((m) => `${m.field}=${m.nodeId}`));
+                }
             } else {
                 // First time this connector is used — run full OPC UA discovery
                 try {
@@ -286,7 +366,12 @@ export function useConnectorTimeline(
                     const numericNodes = discovery.nodes.filter(
                         (n) => NUMERIC_DATA_TYPES.has(n.data_type) || n.data_type === 'Unknown',
                     );
-                    const scored = numericNodes
+
+                    // ── Select sensor nodes (first 4 non-energy numerics) ──────────
+                    const nonEnergyNodes = numericNodes.filter(
+                        (n) => !n.path.some((p) => /^energy$/i.test(p)),
+                    );
+                    const scored = nonEnergyNodes
                         .filter((n) => n.data_type !== 'Unknown')
                         .sort((a, b) => {
                             const score = (n: typeof a) =>
@@ -295,7 +380,7 @@ export function useConnectorTimeline(
                             return score(a) - score(b);
                         });
 
-                    const pool = numericNodes.length > 0 ? (scored.length >= 4 ? scored : numericNodes) : discovery.nodes;
+                    const pool = nonEnergyNodes.length > 0 ? (scored.length >= 4 ? scored : nonEnergyNodes) : discovery.nodes;
                     const candidates = pool.slice(0, 4);
                     nodeIdsRef.current = candidates.map((n) => n.node_id);
 
@@ -306,8 +391,33 @@ export function useConnectorTimeline(
                         dataType:    n.data_type,
                     }));
                     setNodeMappings(mappings);
-                    // Persist so next time we skip discovery
                     saveMappings(connectorId!, mappings);
+
+                    // ── Select energy nodes from Factory/Energy/ subtree ─────────
+                    const energyNodes = numericNodes.filter(
+                        (n) => n.path.some((p) => /^energy$/i.test(p)),
+                    );
+                    const energyMappings: EnergyNodeMapping[] = [];
+                    for (const n of energyNodes) {
+                        const key = n.display_name.toLowerCase().replace(/[^a-z]/g, '');
+                        const spec = ENERGY_DISPLAY_TO_FIELD[key];
+                        if (spec && !energyMappings.some((m) => m.field === spec.field)) {
+                            energyMappings.push({
+                                field:       spec.field,
+                                displayName: n.display_name,
+                                nodeId:      n.node_id,
+                                scaleFactor: spec.scaleFactor,
+                            });
+                        }
+                    }
+                    energyMappingsRef.current = energyMappings;
+                    if (energyMappings.length > 0) {
+                        saveEnergyMappings(connectorId!, energyMappings);
+                        console.log('[Connector] Energy nodes discovered:', energyMappings.map((m) => `${m.field}=${m.nodeId}`));
+                    } else {
+                        console.log('[Connector] No energy nodes found — will derive energy from sensor data');
+                    }
+
                     console.log('[Connector] Discovery complete →', {
                         total: discovery.nodes.length,
                         numeric: numericNodes.length,
@@ -352,14 +462,27 @@ export function useConnectorTimeline(
 
             // ── Seed prevRaw so the first poll has fallback values ─────────────
             try {
-                const batch = await readConnectorBatch(connectorId!, nodeIdsRef.current);
+                const allNodeIds = [
+                    ...nodeIdsRef.current,
+                    ...energyMappingsRef.current.map((m) => m.nodeId),
+                ];
+                const batch = await readConnectorBatch(connectorId!, allNodeIds);
                 if (cancelled) return;
                 for (const item of batch.results) {
-                    const idx = nodeIdsRef.current.indexOf(item.node_id);
-                    const field = FIELD_MAP[idx];
-                    if (!field || item.error) continue;
-                    const val = extractNumeric(item.value);
-                    if (val !== null) prevRawRef.current[field] = val;
+                    // Sensor nodes
+                    const sensorIdx = nodeIdsRef.current.indexOf(item.node_id);
+                    if (sensorIdx >= 0) {
+                        const field = FIELD_MAP[sensorIdx];
+                        if (!field || item.error) continue;
+                        const val = extractNumeric(item.value);
+                        if (val !== null) prevRawRef.current[field] = val;
+                    }
+                    // Energy nodes
+                    const energyMapping = energyMappingsRef.current.find((m) => m.nodeId === item.node_id);
+                    if (energyMapping && !item.error) {
+                        const val = extractNumeric(item.value);
+                        if (val !== null) prevEnergyRef.current[energyMapping.field] = val * energyMapping.scaleFactor;
+                    }
                 }
             } catch {
                 // Non-fatal — first poll tick will populate prevRaw
@@ -367,7 +490,7 @@ export function useConnectorTimeline(
 
             if (cancelled) return;
 
-            // ── Pre-populate buffer from stored telemetry (with raw values) ────
+            // ── Pre-populate sensor buffer from stored telemetry ───────────────
             try {
                 const history = await getTelemetryTimeline(10);
                 if (!cancelled && history.length > 0) {
@@ -409,9 +532,15 @@ export function useConnectorTimeline(
         const interval = setInterval(async () => {
             if (!connectedRef.current || nodeIdsRef.current.length === 0) return;
 
+            // Read sensor nodes + energy nodes in a single HTTP request
+            const allNodeIds = [
+                ...nodeIdsRef.current,
+                ...energyMappingsRef.current.map((m) => m.nodeId),
+            ];
+
             let batchResult;
             try {
-                batchResult = await readConnectorBatch(connectorId, nodeIdsRef.current);
+                batchResult = await readConnectorBatch(connectorId, allNodeIds);
             } catch (err) {
                 consecutiveErrorsRef.current += 1;
                 const detail = err instanceof ApiError
@@ -427,56 +556,61 @@ export function useConnectorTimeline(
             }
 
             const rawValues: Partial<Record<MappedField, number>> = {};
+            const rawEnergy: Partial<Record<EnergyNodeMapping['field'], number>> = {};
             let anySuccess = false;
 
             for (const item of batchResult.results) {
-                const idx  = nodeIdsRef.current.indexOf(item.node_id);
-                const field = FIELD_MAP[idx];
-                if (!field) continue;
                 if (item.error) {
                     console.debug(`[Connector] node ${item.node_id} error: ${item.error}`);
                     continue;
                 }
                 const val = extractNumeric(item.value);
-                if (val !== null) {
-                    rawValues[field]          = val;
-                    prevRawRef.current[field] = val;
-                    anySuccess                = true;
+                if (val === null) continue;
+
+                // Classify as sensor or energy
+                const sensorIdx = nodeIdsRef.current.indexOf(item.node_id);
+                if (sensorIdx >= 0) {
+                    const field = FIELD_MAP[sensorIdx];
+                    if (field) {
+                        rawValues[field]          = val;
+                        prevRawRef.current[field] = val;
+                        anySuccess                = true;
+                    }
+                    continue;
+                }
+
+                const energyMapping = energyMappingsRef.current.find((m) => m.nodeId === item.node_id);
+                if (energyMapping) {
+                    const scaled = val * energyMapping.scaleFactor;
+                    rawEnergy[energyMapping.field]          = scaled;
+                    prevEnergyRef.current[energyMapping.field] = scaled;
+                    anySuccess = true;
                 }
             }
 
             if (!anySuccess) {
-                // If the batch HTTP call succeeded but all values are non-numeric
-                // (e.g. String/Boolean OPC-UA tags), keep previous values and
-                // continue streaming — don't count as a connection error.
-                // Only hard HTTP errors (caught above) increment the error counter.
                 console.warn('[Connector] batch returned no numeric values — using previous.', batchResult.results);
             }
             consecutiveErrorsRef.current = 0;
 
+            // ── Build SensorReading ────────────────────────────────────────────
             const buf = bufferRef.current;
             const rT  = rawValues.temperature ?? prevRawRef.current.temperature ?? 0;
             const rV  = rawValues.vibration   ?? prevRawRef.current.vibration   ?? 0;
             const rP  = rawValues.pressure    ?? prevRawRef.current.pressure    ?? 0;
             const rH  = rawValues.humidity    ?? prevRawRef.current.humidity    ?? 0;
 
-            // Each channel is normalized independently against its own recent history.
-            // Real sensors (temperature, pressure, vibration…) each have their own
-            // volatility patterns, so the normalized curves will differ.
             const temperature = windowNormalize(rT, 'temperature', buf);
             const vibration   = windowNormalize(rV, 'vibration',   buf);
             const pressure    = windowNormalize(rP, 'pressure',    buf);
             const humidity    = windowNormalize(rH, 'humidity',    buf);
 
-            // Anomaly is NEVER auto-detected from raw values.
-            // It is only injected by the TEST ANOMALY button (triggerAnomaly).
             const reading: SensorReading = {
                 timestamp:      Date.now(),
                 temperature,
                 vibration,
                 pressure,
                 humidity,
-                // Store raw engineering values for tooltip display
                 rawTemperature: rT,
                 rawVibration:   rV,
                 rawPressure:    rP,
@@ -489,6 +623,28 @@ export function useConnectorTimeline(
                 const cutoff = reading.timestamp - MAX_BUFFER_MS;
                 return [...pruneBuffer(prev, cutoff), reading];
             });
+
+            // ── Build EnergyReading (real OPC UA data when available) ──────────
+            if (energyMappingsRef.current.length > 0) {
+                const powerDraw   = rawEnergy.powerDraw   ?? prevEnergyRef.current.powerDraw   ?? 0;
+                const coolingLoad = rawEnergy.coolingLoad ?? prevEnergyRef.current.coolingLoad ?? 0;
+                const efficiency  = rawEnergy.efficiency  ?? prevEnergyRef.current.efficiency  ?? 0;
+                // costPerHour: electricity cost in AED — derived from TotalPower (0.45 AED/kWh)
+                const costPerHour = Math.round(powerDraw * 0.45 * 100) / 100;
+
+                const energyReading: EnergyReading = {
+                    timestamp: reading.timestamp,
+                    powerDraw:   Math.round(powerDraw   * 10) / 10,
+                    coolingLoad: Math.round(coolingLoad * 10) / 10,
+                    efficiency:  Math.round(Math.min(100, Math.max(0, efficiency)) * 10) / 10,
+                    costPerHour,
+                };
+
+                setEnergyBuffer((prev) => {
+                    const cutoff = energyReading.timestamp - MAX_BUFFER_MS;
+                    return [...pruneBuffer(prev, cutoff), energyReading];
+                });
+            }
         }, 2000);
 
         return () => clearInterval(interval);
@@ -521,22 +677,30 @@ export function useConnectorTimeline(
     //   xDomain and visibleSensor share ONE `now` snapshot so they can never
     //   drift apart (previously two separate Date.now() calls = desync risk).
     //
-    // RULE 4 — Both derived datasets (energy, product) live here so swapping
-    //   out a layer for lightweight-charts only requires removing one useMemo.
+    // RULE 4 — energyData comes from real OPC UA Energy nodes when available;
+    //   falls back to deriveEnergy (mathematical derivation from sensor data)
+    //   for connectors that have no dedicated energy namespace.
 
     const { windowMs, bucketMs } = GRANULARITY_CONFIG[granularity];
+    const hasEnergyNodes = energyMappingsRef.current.length > 0;
 
     const { xDomain, visibleSensor, energyData, productData } = useMemo(() => {
         const now   = Date.now();
         const left  = now - windowMs;
         const vis   = aggregateToBuckets(sensorBuffer, bucketMs, left);
+
+        // Real energy data from OPC UA nodes — or derived fallback
+        const energy = hasEnergyNodes
+            ? aggregateEnergyBuckets(energyBuffer, bucketMs, left)
+            : vis.map(deriveEnergy);
+
         return {
-            xDomain:     [left, now] as [number, number],
+            xDomain:       [left, now] as [number, number],
             visibleSensor: vis,
-            energyData:  vis.map(deriveEnergy),
-            productData: vis.map(deriveProduct),
+            energyData:    energy,
+            productData:   vis.map(deriveProduct),
         };
-    }, [sensorBuffer, windowMs, bucketMs]);
+    }, [sensorBuffer, energyBuffer, windowMs, bucketMs, hasEnergyNodes]);
 
     const isLive = connectorId !== undefined && status === 'connected';
 

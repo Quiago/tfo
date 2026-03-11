@@ -6,8 +6,8 @@
 
 import type { ReactNode } from 'react';
 
-export type TimelineZoomLevel = 'minute' | 'hour' | 'day' | 'week' | 'year';
-export type TimeGranularity = 'Minute' | 'Hour' | 'Day' | 'Week' | 'Year';
+export type TimelineZoomLevel = 'minute' | 'hour' | 'day' | 'month' | 'year';
+export type TimeGranularity = 'Minute' | 'Hour' | 'Day' | 'Month' | 'Year';
 
 // --- SENSOR LAYER ---------------------------------------------------------------
 export interface SensorReading {
