@@ -78,6 +78,7 @@ const GRANULARITY_CONFIG: Record<TimeGranularity, { windowMs: number; bucketMs: 
 const MAX_BUFFER_MS          = 3_660_000; // 61 min (covers Hour window with headroom)
 const MAX_CONSECUTIVE_ERRORS = 4;
 const NORMALIZE_WINDOW       = 60;      // readings used for rolling min/max per channel
+const RIGHT_PAD_RATIO        = 0.2;     // 20% right margin — live data sits at ~83% width (TradingView style)
 
 /** Remove readings older than `cutoffMs`. Assumes array is chronologically sorted. */
 export function pruneBuffer<T extends { timestamp: number }>(buf: T[], cutoffMs: number): T[] {
@@ -698,21 +699,15 @@ export function useConnectorTimeline(
             ? aggregateEnergyBuckets(energyBuffer, bucketMs, fullLeft)
             : vis.map(deriveEnergy);
 
-        // ── Adaptive left boundary ────────────────────────────────────────────
-        // When the buffer covers less than 20% of the selected window (typical
-        // for Day/Month/Year views on a freshly-started system), anchor the
-        // domain to the oldest available data point instead of showing a large
-        // empty canvas on the left.
-        // For Minute and Hour views the 62-min seed fills the window, so
-        // coverageRatio ≥ 1 → the full configured window is always shown.
-        const oldest         = vis.length > 0 ? vis[0].timestamp : null;
-        const coverageRatio  = oldest !== null ? (now - oldest) / windowMs : 0;
-        const domainLeft     = (oldest !== null && coverageRatio < 0.2)
-            ? Math.max(fullLeft, oldest - Math.max(bucketMs, 5_000))
-            : fullLeft;
+        // ── TradingView-style sliding window ─────────────────────────────────
+        // The domain always spans [now - windowMs, now + windowMs * RIGHT_PAD_RATIO].
+        // This keeps live data at ~80% of the chart width with 20% empty right
+        // margin — exactly like crypto/trading charts. The window slides right
+        // continuously as `now` advances; it NEVER resets or snaps.
+        const domainRight = now + Math.round(windowMs * RIGHT_PAD_RATIO);
 
         return {
-            xDomain:       [domainLeft, now] as [number, number],
+            xDomain:       [fullLeft, domainRight] as [number, number],
             visibleSensor: vis,
             energyData:    energy,
             productData:   vis.map(deriveProduct),
