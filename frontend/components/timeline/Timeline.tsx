@@ -38,6 +38,7 @@ import {
     YAxis,
 } from 'recharts';
 import { ChartDefs } from './ChartDefs';
+import { SensorLayerLW } from './SensorLayerLW';
 
 // ─── CONSTANTS ──────────────────────────────────────────────────────────────
 const COMMON_Y_AXIS_WIDTH = 80;
@@ -83,25 +84,6 @@ function formatNumber(n: number): string {
 }
 
 // ─── NORMALIZATION UTILITY ──────────────────────────────────────────────────
-// Fixed operational ranges — no dynamic extension from outliers.
-// Gives good visual spread for normal values; anomaly spikes clip at top (100%).
-const SENSOR_RANGES: Record<'vibration' | 'temperature' | 'pressure' | 'humidity', [number, number]> = {
-    vibration: [0, 10],      // Normal 2-4 at 20-40%, warning 8 at 80%, critical clips at top
-    temperature: [20, 45],   // Normal 25-35 at 20-60%, heat events visible at top
-    pressure: [4, 8.5],      // Normal 6-7.5 at 44-78%, low pressure visible at bottom
-    humidity: [45, 68],      // Normal 50-58 at 22-57%, high humidity visible at top
-};
-
-// Normalize to 0-100, clamped — extreme values hit ceiling/floor instead of compressing everything
-function normalizeForDisplay(
-    value: number,
-    sensorType: 'vibration' | 'temperature' | 'pressure' | 'humidity',
-): number {
-    const [min, max] = SENSOR_RANGES[sensorType];
-    const normalized = ((value - min) / (max - min)) * 100;
-    return Math.max(0, Math.min(100, normalized));
-}
-
 // ─── CUSTOM TOOLTIPS ────────────────────────────────────────────────────────
 
 // Colors per field (stable — used in tooltip dots and filter bar)
@@ -412,8 +394,10 @@ const SensorLayer = memo(function SensorLayer({
 
     const ticks = useMemo(() => xTicks(xDomain), [xDomain]);
 
-    // Tooltip is created once per signalMeta change via factory (avoids closure stale data)
-    const TooltipContent = useMemo(() => makeSensorTooltip(signalMeta), [signalMeta]);
+    // Pass the render function directly (not <Component />).
+    // This avoids creating a new component type on each render while keeping signalMeta
+    // in scope via the useMemo closure — Recharts calls it as a render function.
+    const tooltipRenderer = useMemo(() => makeSensorTooltip(signalMeta), [signalMeta]);
 
     return (
         <div>
@@ -443,7 +427,7 @@ const SensorLayer = memo(function SensorLayer({
                         width={COMMON_Y_AXIS_WIDTH}
                         tickFormatter={(v: number) => `${v}%`}
                     />
-                    <Tooltip content={<TooltipContent />} wrapperStyle={{ zIndex: 50 }} />
+                    <Tooltip content={tooltipRenderer} wrapperStyle={{ zIndex: 50 }} />
 
                     {visibleSensors.pressure    && <Area isAnimationActive={false} type="monotone" dataKey="pressure"    stroke="#A9FFB5" strokeWidth={2} fill="url(#gradient-pressure)"    dot={false} />}
                     {visibleSensors.temperature && <Area isAnimationActive={false} type="monotone" dataKey="temperature" stroke="#FFCEBD" strokeWidth={2} fill="url(#gradient-temperature)" dot={false} />}
@@ -1239,7 +1223,8 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
                                 nodeMappings={nodeMappings}
                             />
                             <div className="px-2">
-                                <SensorLayer
+                                {/* SensorLayerLW: canvas-based, O(1) streaming updates — no SVG reconciliation */}
+                                <SensorLayerLW
                                     data={sensorData}
                                     xDomain={xDomain}
                                     granularity={granularity}

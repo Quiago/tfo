@@ -55,9 +55,24 @@ const GRANULARITY_CONFIG: Record<TimeGranularity, { windowMs: number; bucketMs: 
     Year:   { windowMs: 600_000,  bucketMs: 120_000 },  // last 10 min — 2 min buckets
 };
 
-const MAX_BUFFER             = 300;  // 300 × 2s = 10 min of raw readings
+// Time-based buffer bound: keep the max window (10 min) plus 20% headroom.
+// When granularity = Minute (1 min window), the buffer auto-prunes to ~72s of data
+// instead of holding 9 minutes of invisible readings.
+const MAX_BUFFER_MS          = 720_000; // 12 min ceiling (covers 10 min max window)
 const MAX_CONSECUTIVE_ERRORS = 4;
-const NORMALIZE_WINDOW       = 60;   // readings used for rolling min/max per channel
+const NORMALIZE_WINDOW       = 60;      // readings used for rolling min/max per channel
+
+/** Remove readings older than `cutoffMs`. Assumes array is chronologically sorted. */
+function pruneBuffer(buf: SensorReading[], cutoffMs: number): SensorReading[] {
+    if (buf.length === 0) return buf;
+    // Binary-search first index that's >= cutoff (faster than filter for large buffers)
+    let lo = 0, hi = buf.length;
+    while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (buf[mid].timestamp < cutoffMs) lo = mid + 1; else hi = mid;
+    }
+    return lo === 0 ? buf : buf.slice(lo);
+}
 
 // ─── DISCOVERY CACHE (localStorage) ──────────────────────────────────────────
 //
@@ -168,10 +183,10 @@ function aggregateToBuckets(
 
 // ─── DERIVED METRICS ─────────────────────────────────────────────────────────
 //
-// Energy and Product use different formula weights so each chart has a
-// visually distinct curve even when sensor channels are correlated.
+// Exported so individual chart-layer components can derive their own data
+// locally without depending on the hook (useful for lightweight-charts adoption).
 
-function deriveEnergy(s: SensorReading): EnergyReading {
+export function deriveEnergy(s: SensorReading): EnergyReading {
     // powerDraw: dominated by vibration (×8) — reacts strongly to vib changes
     const powerDraw   = Math.round((50 + s.temperature * 1.5 + s.vibration * 8) * 10) / 10;
     // coolingLoad: 30% of power — tracks power but with a dampening multiplier
@@ -182,7 +197,7 @@ function deriveEnergy(s: SensorReading): EnergyReading {
     return { timestamp: s.timestamp, powerDraw, coolingLoad, efficiency, costPerHour };
 }
 
-function deriveProduct(s: SensorReading): ProductMetric {
+export function deriveProduct(s: SensorReading): ProductMetric {
     // uptime driven by pressure & humidity (not vibration) → independent shape
     const pressurePenalty = Math.max(0, (50 - s.pressure) * 0.3);
     const humidityPenalty = Math.max(0, (s.humidity - 60) * 0.2);
@@ -347,8 +362,10 @@ export function useConnectorTimeline(
                         anomaly:        false,
                         alertLevel:     'none' as const,
                     }));
-                    setSensorBuffer(seeded.slice(-MAX_BUFFER));
-                    bufferRef.current = seeded.slice(-MAX_BUFFER);
+                    const cutoff = Date.now() - MAX_BUFFER_MS;
+                    const kept = pruneBuffer(seeded, cutoff);
+                    setSensorBuffer(kept);
+                    bufferRef.current = kept;
                     console.log('[Connector] Pre-populated buffer with', seeded.length, 'telemetry readings');
                 }
             } catch {
@@ -446,7 +463,10 @@ export function useConnectorTimeline(
                 alertLevel:     'none',
             };
 
-            setSensorBuffer((prev) => [...prev.slice(-(MAX_BUFFER - 1)), reading]);
+            setSensorBuffer((prev) => {
+                const cutoff = reading.timestamp - MAX_BUFFER_MS;
+                return [...pruneBuffer(prev, cutoff), reading];
+            });
         }, 2000);
 
         return () => clearInterval(interval);
@@ -465,29 +485,36 @@ export function useConnectorTimeline(
             anomaly:     true,
             alertLevel:  'critical',
         };
-        setSensorBuffer((prev) => [...prev.slice(-(MAX_BUFFER - 1)), spike]);
+        setSensorBuffer((prev) => {
+            const cutoff = spike.timestamp - MAX_BUFFER_MS;
+            return [...pruneBuffer(prev, cutoff), spike];
+        });
     }, []);
 
     // ── Aggregation + X-axis domain ───────────────────────────────────────────
+    //
+    // RULE 2 — Strict sliding window:
+    //   right = Date.now() (the "live edge" even if the last poll was 2s ago)
+    //   left  = right - windowMs
+    //   xDomain and visibleSensor share ONE `now` snapshot so they can never
+    //   drift apart (previously two separate Date.now() calls = desync risk).
+    //
+    // RULE 4 — Both derived datasets (energy, product) live here so swapping
+    //   out a layer for lightweight-charts only requires removing one useMemo.
 
     const { windowMs, bucketMs } = GRANULARITY_CONFIG[granularity];
 
-    const visibleSensor = useMemo(() => {
-        const windowStart = Date.now() - windowMs;
-        return aggregateToBuckets(sensorBuffer, bucketMs, windowStart);
+    const { xDomain, visibleSensor, energyData, productData } = useMemo(() => {
+        const now   = Date.now();
+        const left  = now - windowMs;
+        const vis   = aggregateToBuckets(sensorBuffer, bucketMs, left);
+        return {
+            xDomain:     [left, now] as [number, number],
+            visibleSensor: vis,
+            energyData:  vis.map(deriveEnergy),
+            productData: vis.map(deriveProduct),
+        };
     }, [sensorBuffer, windowMs, bucketMs]);
-
-    // xDomain is the time window for ALL chart X-axes.
-    // It always spans [now - windowMs, now] and updates on every poll cycle,
-    // making charts scroll left continuously — the TradingView effect.
-    const xDomain = useMemo((): [number, number] => {
-        const now = Date.now();
-        return [now - windowMs, now];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [sensorBuffer, windowMs]); // sensorBuffer dep ensures domain refreshes on each poll
-
-    const energyData  = useMemo(() => visibleSensor.map(deriveEnergy),  [visibleSensor]);
-    const productData = useMemo(() => visibleSensor.map(deriveProduct), [visibleSensor]);
 
     const isLive = connectorId !== undefined && status === 'connected';
 
