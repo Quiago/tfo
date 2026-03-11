@@ -699,15 +699,26 @@ export function useConnectorTimeline(
             ? aggregateEnergyBuckets(energyBuffer, bucketMs, fullLeft)
             : vis.map(deriveEnergy);
 
-        // ── TradingView-style sliding window ─────────────────────────────────
-        // The domain always spans [now - windowMs, now + windowMs * RIGHT_PAD_RATIO].
-        // This keeps live data at ~80% of the chart width with 20% empty right
-        // margin — exactly like crypto/trading charts. The window slides right
-        // continuously as `now` advances; it NEVER resets or snaps.
-        const domainRight = now + Math.round(windowMs * RIGHT_PAD_RATIO);
+        // ── TradingView-style adaptive sliding window ─────────────────────────
+        //
+        // domainLeft = max(oldest bucket timestamp, now - windowMs)
+        //   ∙ When buffer covers the full window → standard left edge (now - windowMs)
+        //   ∙ When data is sparse (Day/Month/Year on a fresh session) → left edge
+        //     anchors to oldest available data so it fills left-to-right, not
+        //     compressed into a right-side sliver
+        //
+        // domainRight = now + visibleSpan * RIGHT_PAD_RATIO
+        //   ∙ Live data always lands at ~83% of chart width
+        //   ∙ Right margin grows proportionally during warm-up, then stabilises
+        //   ∙ Bucket midpoint overshoot (up to bucketMs/2 past now) stays within
+        //     the padding zone and never causes out-of-range rendering
+        const firstTs     = vis.length > 0 ? vis[0].timestamp : now;
+        const domainLeft  = Math.max(firstTs, now - windowMs);
+        const visibleSpan = Math.max(now - domainLeft, bucketMs > 0 ? bucketMs : 5_000);
+        const domainRight = now + Math.round(visibleSpan * RIGHT_PAD_RATIO);
 
         return {
-            xDomain:       [fullLeft, domainRight] as [number, number],
+            xDomain:       [domainLeft, domainRight] as [number, number],
             visibleSensor: vis,
             energyData:    energy,
             productData:   vis.map(deriveProduct),
