@@ -70,7 +70,7 @@ const POINT_COUNTS: Record<TimeGranularity, number> = {
     Minute: 120,
     Hour: 96,
     Day: 90,
-    Week: 52,
+    Month: 52,
     Year: 60,
 };
 
@@ -78,7 +78,7 @@ const INTERVALS_MS: Record<TimeGranularity, number> = {
     Minute: 60 * 1000,
     Hour: 3600 * 1000,
     Day: 86400 * 1000,
-    Week: 7 * 86400 * 1000,
+    Month: 7 * 86400 * 1000,
     Year: 30 * 86400 * 1000,
 };
 
@@ -108,7 +108,7 @@ const BASE_TARGETS: Record<TimeGranularity, number> = {
     Minute: 850,              // 850 units/min
     Hour: 51000,              // 850 * 60
     Day: 1224000,             // 850 * 60 * 24
-    Week: 8568000,            // 850 * 60 * 24 * 7
+    Month: 8568000,           // 850 * 60 * 24 * 7
     Year: 312840000,          // 850 * 60 * 24 * 365
 };
 

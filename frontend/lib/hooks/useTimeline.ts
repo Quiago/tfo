@@ -11,16 +11,16 @@ const ZOOM_MULTIPLIERS: Record<TimelineZoomLevel, number> = {
   minute: 60 * 1000,
   hour: 60 * 60 * 1000,
   day: 24 * 60 * 60 * 1000,
-  week: 7 * 24 * 60 * 60 * 1000,
+  month: 30 * 24 * 60 * 60 * 1000,
   year: 365 * 24 * 60 * 60 * 1000,
 };
 
 const DEFAULT_ZOOM_WINDOWS: Record<TimelineZoomLevel, number> = {
-  minute: 60 * 60 * 1000, // Show 1 hour
-  hour: 24 * 60 * 60 * 1000, // Show 1 day
-  day: 7 * 24 * 60 * 60 * 1000, // Show 1 week
-  week: 30 * 24 * 60 * 60 * 1000, // Show 1 month
-  year: 365 * 24 * 60 * 60 * 1000, // Show 1 year
+  minute: 60 * 60 * 1000,
+  hour: 24 * 60 * 60 * 1000,
+  day: 7 * 24 * 60 * 60 * 1000,
+  month: 30 * 24 * 60 * 60 * 1000,
+  year: 365 * 24 * 60 * 60 * 1000,
 };
 
 interface UseTimelineOptions {

@@ -278,25 +278,29 @@ export const SensorLayerLW = memo(function SensorLayerLW({
                 series.update({ time: toUTC(last.timestamp), value: last[ch.field] as number });
             } else {
                 // ── Full redraw (initial load, window/granularity change) ──────
-                const points: LineData[] = data.map((r) => ({
-                    time:  toUTC(r.timestamp),
-                    value: r[ch.field] as number,
-                }));
+                // Deduplicate consecutive points with the same epoch-second to prevent
+                // "data must be asc ordered by time" assertion from lightweight-charts.
+                const points: LineData[] = data
+                    .map((r) => ({ time: toUTC(r.timestamp), value: r[ch.field] as number }))
+                    .filter((p, i, arr) => i === 0 || p.time !== arr[i - 1].time);
                 series.setData(points);
             }
         }
 
-        // Set visible range after data is loaded — safe here because setData/update
-        // has already populated the series above.
-        try {
-            chartRef.current.timeScale().setVisibleRange({
-                from: toUTC(xDomain[0]),
-                to:   toUTC(xDomain[1]),
-            });
-        } catch {
-            // Thrown when the loaded range doesn't intersect xDomain yet —
-            // chart auto-fits to available data in that case.
-        }
+        // Defer setVisibleRange via rAF so it runs after LW's internal fitContent
+        // that fires synchronously after setData() — this fixes the left-vs-right
+        // misalignment between the sensor chart and the Recharts energy/product charts.
+        const chart = chartRef.current;
+        requestAnimationFrame(() => {
+            try {
+                chart?.timeScale().setVisibleRange({
+                    from: toUTC(xDomain[0]),
+                    to:   toUTC(xDomain[1]),
+                });
+            } catch {
+                // Thrown when loaded range doesn't intersect xDomain — chart auto-fits.
+            }
+        });
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [data, xDomain]); // xDomain included so granularity/window switches scroll correctly
 

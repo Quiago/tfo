@@ -70,7 +70,7 @@ function formatTimestamp(ts: number, granularity: TimeGranularity): string {
             return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         case 'Day':
             return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-        case 'Week':
+        case 'Month':
             return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
         case 'Year':
             return d.toLocaleDateString([], { month: 'short', year: '2-digit' });
@@ -934,7 +934,7 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
         'Minute',
         'Hour',
         'Day',
-        'Week',
+        'Month',
         'Year',
     ];
 

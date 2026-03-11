@@ -48,17 +48,17 @@ export interface NodeMapping {
 // As the buffer grows (future: DB persistence), Day/Week/Year views fill in.
 
 const GRANULARITY_CONFIG: Record<TimeGranularity, { windowMs: number; bucketMs: number }> = {
-    Minute: { windowMs: 60_000,   bucketMs: 0 },       // last 60s — raw 2s readings
-    Hour:   { windowMs: 300_000,  bucketMs: 10_000 },   // last 5 min — 10s buckets
-    Day:    { windowMs: 600_000,  bucketMs: 30_000 },   // last 10 min — 30s buckets
-    Week:   { windowMs: 600_000,  bucketMs: 60_000 },   // last 10 min — 1 min buckets
-    Year:   { windowMs: 600_000,  bucketMs: 120_000 },  // last 10 min — 2 min buckets
+    Minute: { windowMs: 60_000,           bucketMs: 0 },          // last 60s  — raw 2s readings
+    Hour:   { windowMs: 3_600_000,        bucketMs: 30_000 },     // last 1h   — 30s buckets
+    Day:    { windowMs: 86_400_000,       bucketMs: 300_000 },    // last 24h  — 5 min buckets
+    Month:  { windowMs: 2_592_000_000,    bucketMs: 3_600_000 },  // last 30d  — 1h buckets
+    Year:   { windowMs: 31_536_000_000,   bucketMs: 86_400_000 }, // last 365d — 1d buckets
 };
 
-// Time-based buffer bound: keep the max window (10 min) plus 20% headroom.
-// When granularity = Minute (1 min window), the buffer auto-prunes to ~72s of data
-// instead of holding 9 minutes of invisible readings.
-const MAX_BUFFER_MS          = 720_000; // 12 min ceiling (covers 10 min max window)
+// In-memory buffer ceiling: hold the Hour window + 1 min headroom.
+// Day/Month/Year views are intentionally sparse until DB-backed history pagination
+// is wired in — the buffer can only grow as fast as the 2s polling interval.
+const MAX_BUFFER_MS          = 3_660_000; // 61 min (covers Hour window with headroom)
 const MAX_CONSECUTIVE_ERRORS = 4;
 const NORMALIZE_WINDOW       = 60;      // readings used for rolling min/max per channel
 

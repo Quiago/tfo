@@ -99,13 +99,12 @@ describe('pruneBuffer', () => {
         expect(pruneBuffer(buf, BASE_TS)).toHaveLength(1);
     });
 
-    it('MAX_BUFFER_MS (12 min) covers the largest configured window (10 min)', () => {
-        // The largest windowMs is 600_000ms (10 min for Day/Week/Year views).
-        // MAX_BUFFER_MS = 720_000ms (12 min) must be > 600_000ms.
-        // This ensures data for the full window is never accidentally pruned.
-        const MAX_BUFFER_MS = 720_000;
-        const LARGEST_WINDOW_MS = 600_000;
-        expect(MAX_BUFFER_MS).toBeGreaterThan(LARGEST_WINDOW_MS);
+    it('MAX_BUFFER_MS (61 min) covers the Hour window (60 min)', () => {
+        // In-memory buffer holds 61 minutes — covers Minute + Hour views fully.
+        // Day/Month/Year views are backed by DB history; in-memory shows recent data.
+        const MAX_BUFFER_MS = 3_660_000;
+        const HOUR_WINDOW_MS = 3_600_000;
+        expect(MAX_BUFFER_MS).toBeGreaterThan(HOUR_WINDOW_MS);
     });
 });
 
