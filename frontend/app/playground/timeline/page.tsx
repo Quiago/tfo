@@ -10,7 +10,7 @@ const MultiLayerTimeline = dynamic(
 
 export default function TimelinePlayground() {
   return (
-    <div className="min-h-screen bg-white">
+    <div className="h-screen bg-[#171921] overflow-hidden">
       <MultiLayerTimeline />
     </div>
   );

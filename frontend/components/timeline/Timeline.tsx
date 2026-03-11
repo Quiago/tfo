@@ -1021,7 +1021,7 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
     const humanCount = actionData.filter((a) => !a.isAI).length;
 
     return (
-        <div className="w-full min-h-full bg-[#171921] text-white flex flex-col relative">
+        <div className="w-full h-full bg-[#171921] text-white flex flex-col overflow-hidden relative">
             {/* Connector setup modal */}
             {modalOpen && (
                 <ConnectorModal
@@ -1141,8 +1141,8 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
                 </div>
             )}
 
-            {/* Layers */}
-            <div className={`divide-y divide-[#98A6D4]/30 ${!activeConnectorId ? 'hidden' : ''}`}>
+            {/* Layers: flex-1 + min-h-0 so this section owns vertical scroll */}
+            <div className={`flex-1 min-h-0 overflow-y-auto divide-y divide-[#98A6D4]/30 ${!activeConnectorId ? 'hidden' : ''}`}>
                 {/* Product Layer */}
                 <div
                     className={`transition-all duration-300 ${expandedLayer && expandedLayer !== 'product'

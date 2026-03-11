@@ -244,29 +244,30 @@ export const SensorLayerLW = memo(function SensorLayerLW({
         chartRef.current?.applyOptions({ height });
     }, [height]);
 
-    // ── xDomain → visible range (sub-ms, no React re-render needed in chart) ──
-    useEffect(() => {
-        chartRef.current?.timeScale().setVisibleRange({
-            from: toUTC(xDomain[0]),
-            to:   toUTC(xDomain[1]),
-        });
-    }, [xDomain]);
-
-    // ── Data update: incremental update() vs full setData() ───────────────────
+    // ── Data update + visible range (merged into one effect) ─────────────────
     //
-    // streaming rule: if the array grew by exactly 1 → use series.update() O(1)
-    // any other change (window switch, initial load, anomaly) → setData() O(n)
+    // WHY merged: setVisibleRange throws "Value is null" when called before any
+    // data is loaded. Merging guarantees the range is only set after the series
+    // have data — the only safe moment to call it.
+    //
+    // Streaming strategy:
+    //   isIncremental = previousLength > 0 AND grew by exactly 1
+    //   → series.update() O(1), no full redraw
+    //   anything else (initial load, history pre-population, window change)
+    //   → series.setData() then setVisibleRange
     useEffect(() => {
-        if (!data.length) return;
+        if (!data.length || !chartRef.current) return;
 
-        const isIncremental = data.length === prevDataLen.current + 1;
+        // prevDataLen.current > 0 guards against treating the very first batch
+        // as incremental (data.length === 1 would match 0+1 incorrectly).
+        const isIncremental =
+            prevDataLen.current > 0 && data.length === prevDataLen.current + 1;
         prevDataLen.current = data.length;
 
         for (const ch of CHANNELS) {
             const series = seriesRef.current[ch.field];
             if (!series) continue;
 
-            // Visibility toggle
             series.applyOptions({ visible: visibleSensors[ch.field] !== false });
 
             if (!visibleSensors[ch.field]) continue;
@@ -284,9 +285,20 @@ export const SensorLayerLW = memo(function SensorLayerLW({
                 series.setData(points);
             }
         }
-    // visibleSensors intentionally omitted from deps — handled inline above
+
+        // Set visible range after data is loaded — safe here because setData/update
+        // has already populated the series above.
+        try {
+            chartRef.current.timeScale().setVisibleRange({
+                from: toUTC(xDomain[0]),
+                to:   toUTC(xDomain[1]),
+            });
+        } catch {
+            // Thrown when the loaded range doesn't intersect xDomain yet —
+            // chart auto-fits to available data in that case.
+        }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [data]);
+    }, [data, xDomain]); // xDomain included so granularity/window switches scroll correctly
 
     // Visibility-only changes (filter bar toggles, no new data)
     useEffect(() => {

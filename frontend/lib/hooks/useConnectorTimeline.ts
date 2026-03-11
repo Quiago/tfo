@@ -63,7 +63,7 @@ const MAX_CONSECUTIVE_ERRORS = 4;
 const NORMALIZE_WINDOW       = 60;      // readings used for rolling min/max per channel
 
 /** Remove readings older than `cutoffMs`. Assumes array is chronologically sorted. */
-function pruneBuffer(buf: SensorReading[], cutoffMs: number): SensorReading[] {
+export function pruneBuffer(buf: SensorReading[], cutoffMs: number): SensorReading[] {
     if (buf.length === 0) return buf;
     // Binary-search first index that's >= cutoff (faster than filter for large buffers)
     let lo = 0, hi = buf.length;

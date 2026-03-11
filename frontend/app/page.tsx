@@ -256,7 +256,7 @@ function Dashboard() {
                 {/* ── OTHER MODULES (lazy mount, visibility toggle) ───── */}
                 {
                     mounted.has('timeline') && (
-                        <div className={`absolute inset-0 overflow-auto bg-white dark:bg-zinc-950 ${activeModule === 'timeline' ? 'z-30' : 'z-0 invisible pointer-events-none'}`}>
+                        <div className={`absolute inset-0 overflow-hidden bg-[#171921] ${activeModule === 'timeline' ? 'z-30' : 'z-0 invisible pointer-events-none'}`}>
                             <MultiLayerTimeline />
                         </div>
                     )
