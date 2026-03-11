@@ -111,17 +111,18 @@ describe('pruneBuffer', () => {
 // ─── deriveEnergy ─────────────────────────────────────────────────────────────
 
 describe('deriveEnergy', () => {
-    it('produces a powerDraw proportional to temperature and vibration', () => {
-        const s = makeReading(0, { temperature: 10, vibration: 5 });
+    it('produces a powerDraw driven by pressure and humidity', () => {
+        const s = makeReading(0, { pressure: 10, humidity: 5, temperature: 0, vibration: 0 });
         const e = deriveEnergy(s);
-        // powerDraw = 50 + temp*1.5 + vib*8 = 50 + 15 + 40 = 105
-        expect(e.powerDraw).toBe(105);
+        // powerDraw = 100 + pressure*5 + humidity*2 + temperature*0.5
+        //           = 100 + 50 + 10 + 0 = 160
+        expect(e.powerDraw).toBe(160);
     });
 
-    it('coolingLoad is 30% of powerDraw', () => {
+    it('coolingLoad is 35% of powerDraw', () => {
         const s = makeReading(0, { temperature: 0, vibration: 0 });
         const e = deriveEnergy(s);
-        expect(e.coolingLoad).toBeCloseTo(e.powerDraw * 0.3, 1);
+        expect(e.coolingLoad).toBeCloseTo(e.powerDraw * 0.35, 1);
     });
 
     it('efficiency is at least 60 (floor)', () => {

@@ -130,7 +130,11 @@ function windowNormalize(
     const max    = Math.max(...vals);
     const spread = max - min;
     if (spread < 0.001) return 50;
-    return Math.round(((raw - min) / spread) * 100 * 100) / 100;
+    // Clamp to [0, 100] — raw value can temporarily exceed the rolling window
+    // range (e.g. a new peak not yet in history), which would push the result
+    // above 100 or below 0 and break both chart Y-axes and deriveEnergy.
+    const pct = ((raw - min) / spread) * 100;
+    return Math.round(Math.min(100, Math.max(0, pct)) * 100) / 100;
 }
 
 function extractNumeric(value: unknown): number | null {
@@ -202,11 +206,14 @@ function aggregateToBuckets(
 // locally without depending on the hook (useful for lightweight-charts adoption).
 
 export function deriveEnergy(s: SensorReading): EnergyReading {
-    // powerDraw: dominated by vibration (×8) — reacts strongly to vib changes
-    const powerDraw   = Math.round((50 + s.temperature * 1.5 + s.vibration * 8) * 10) / 10;
-    // coolingLoad: 30% of power — tracks power but with a dampening multiplier
-    const coolingLoad = Math.round(powerDraw * 0.3 * 10) / 10;
-    // efficiency: INVERSE of vibration — drops when vibration rises
+    // powerDraw: driven by PRESSURE (compressors) + HUMIDITY (HVAC/cooling),
+    // with only a small temperature contribution and almost no vibration.
+    // This ensures the Energy chart has an independent visual shape from the
+    // Sensor chart (which is vibration-dominated).
+    const powerDraw   = Math.round((100 + s.pressure * 5 + s.humidity * 2 + s.temperature * 0.5) * 10) / 10;
+    // coolingLoad: 35% of power, tracks pressure (compressor cooling circuits)
+    const coolingLoad = Math.round(powerDraw * 0.35 * 10) / 10;
+    // efficiency: INVERSE of vibration — high vibration = bearing friction = wasted power
     const efficiency  = Math.round(Math.max(60, 100 - s.vibration * 0.4) * 10) / 10;
     const costPerHour = Math.round(powerDraw * 0.45 * 100) / 100;
     return { timestamp: s.timestamp, powerDraw, coolingLoad, efficiency, costPerHour };
