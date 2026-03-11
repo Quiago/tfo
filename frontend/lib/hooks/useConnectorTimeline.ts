@@ -491,8 +491,12 @@ export function useConnectorTimeline(
             if (cancelled) return;
 
             // ── Pre-populate sensor buffer from stored telemetry ───────────────
+            // Request enough history to fill the largest in-memory window (Hour).
+            // The API now accepts up to 1440 min; we clamp to the buffer ceiling
+            // so we never request more data than the buffer can hold.
             try {
-                const history = await getTelemetryTimeline(10);
+                const seedMinutes = Math.ceil(MAX_BUFFER_MS / 60_000); // ≈ 62 min
+                const history = await getTelemetryTimeline(seedMinutes);
                 if (!cancelled && history.length > 0) {
                     const seeded: SensorReading[] = history.map((p) => ({
                         timestamp:      p.timestamp,
@@ -511,10 +515,10 @@ export function useConnectorTimeline(
                     const kept = pruneBuffer(seeded, cutoff);
                     setSensorBuffer(kept);
                     bufferRef.current = kept;
-                    console.log('[Connector] Pre-populated buffer with', seeded.length, 'telemetry readings');
+                    console.log('[Connector] Seeded buffer:', kept.length, 'readings from last', seedMinutes, 'min');
                 }
-            } catch {
-                // Non-fatal — live polling will populate the buffer
+            } catch (err) {
+                console.warn('[Connector] Telemetry seed failed (non-fatal):', err);
             }
 
             connectedRef.current = true;
@@ -685,17 +689,30 @@ export function useConnectorTimeline(
     const hasEnergyNodes = energyMappingsRef.current.length > 0;
 
     const { xDomain, visibleSensor, energyData, productData } = useMemo(() => {
-        const now   = Date.now();
-        const left  = now - windowMs;
-        const vis   = aggregateToBuckets(sensorBuffer, bucketMs, left);
+        const now      = Date.now();
+        const fullLeft = now - windowMs;
+        const vis      = aggregateToBuckets(sensorBuffer, bucketMs, fullLeft);
 
         // Real energy data from OPC UA nodes — or derived fallback
         const energy = hasEnergyNodes
-            ? aggregateEnergyBuckets(energyBuffer, bucketMs, left)
+            ? aggregateEnergyBuckets(energyBuffer, bucketMs, fullLeft)
             : vis.map(deriveEnergy);
 
+        // ── Adaptive left boundary ────────────────────────────────────────────
+        // When the buffer covers less than 20% of the selected window (typical
+        // for Day/Month/Year views on a freshly-started system), anchor the
+        // domain to the oldest available data point instead of showing a large
+        // empty canvas on the left.
+        // For Minute and Hour views the 62-min seed fills the window, so
+        // coverageRatio ≥ 1 → the full configured window is always shown.
+        const oldest         = vis.length > 0 ? vis[0].timestamp : null;
+        const coverageRatio  = oldest !== null ? (now - oldest) / windowMs : 0;
+        const domainLeft     = (oldest !== null && coverageRatio < 0.2)
+            ? Math.max(fullLeft, oldest - Math.max(bucketMs, 5_000))
+            : fullLeft;
+
         return {
-            xDomain:       [left, now] as [number, number],
+            xDomain:       [domainLeft, now] as [number, number],
             visibleSensor: vis,
             energyData:    energy,
             productData:   vis.map(deriveProduct),
