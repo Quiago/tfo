@@ -11,12 +11,24 @@ import { UpdatesView } from '@/components/updates/UpdatesView'
 import { useOpshubStore } from '@/lib/store/opshub-store'
 import { useAuthStore } from '@/lib/store/auth-store'
 import { useTfoStore } from '@/lib/store/tfo-store'
+import { useScreenContext } from '@/lib/store/screen-context-store'
 import type { TfoModule } from '@/lib/types/tfo'
 import {
     Minimize2
 } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useState } from 'react'
+
+/** Convert raw mesh/asset IDs like "KUKA_Robot_Arm" → "KUKA Robot Arm". */
+function formatMeshName(raw: string): string {
+    return raw
+        .replace(/[_-]/g, ' ')
+        .replace(/([a-z])([A-Z])/g, '$1 $2')
+        .replace(/\b\w/g, (c) => c.toUpperCase())
+        .trim();
+}
+
+const TEAM_URL_PARAM = 'team' as const;
 
 // Dynamic imports — SSR disabled for heavy components
 const MultiLayerTimeline = dynamic(
@@ -84,14 +96,18 @@ function Dashboard() {
 
     const setSelectedWorkOrderId = useOpshubStore(s => s.setSelectedWorkOrderId)
 
+    // ── Screen context (for AI awareness) ─────────────────────────────────────
+    const screenCtx = useScreenContext()
+
     const handleModuleChange = useCallback(
         (mod: TfoModule) => {
             setActiveModule(mod)
+            screenCtx.setActiveModule(mod)
             if (mod === 'opshub') {
                 setSelectedWorkOrderId(null)
             }
         },
-        [setActiveModule, setSelectedWorkOrderId]
+        [setActiveModule, setSelectedWorkOrderId, screenCtx]
     )
 
     // Track which modules have been visited (lazy mount, never unmount)
@@ -112,18 +128,44 @@ function Dashboard() {
 
     const isOverview = activeModule === 'overview'
 
+    // ── URL sync helpers (client-only, no router navigation) ──────────────────
+    const expandAsset = useCallback((meshName: string, isAnomaly?: boolean) => {
+        setSelectedAsset(meshName)
+        setViewMode('details')
+        screenCtx.setSelectedTeam(meshName, formatMeshName(meshName))
+        window.history.replaceState(null, '', `?${TEAM_URL_PARAM}=${encodeURIComponent(meshName)}`)
+        if (isAnomaly) setAutoTriggerAnomaly(true)
+    }, [screenCtx])
+
+    const collapseView = useCallback(() => {
+        setViewMode('overview')
+        setSelectedAsset(null)
+        screenCtx.setSelectedTeam(null)
+        window.history.replaceState(null, '', window.location.pathname)
+    }, [screenCtx])
+
+    // Restore expand state from URL on first mount
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search)
+        const teamFromUrl = params.get(TEAM_URL_PARAM)
+        if (teamFromUrl) {
+            setSelectedAsset(teamFromUrl)
+            setViewMode('details')
+            screenCtx.setSelectedTeam(teamFromUrl, formatMeshName(teamFromUrl))
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+
     // When clicking a mesh, switch to details mode
     useEffect(() => {
         const handleMessage = (event: MessageEvent) => {
             if (event.data?.type === 'MESH_CLICK') {
-                const meshName = event.data.meshName
-                setSelectedAsset(meshName)
-                setViewMode('details')
+                expandAsset(event.data.meshName)
             }
         }
         window.addEventListener('message', handleMessage)
         return () => window.removeEventListener('message', handleMessage)
-    }, [])
+    }, [expandAsset])
 
     // Handler for DigitalTwinNavigator click (need to expose this via the iframe or component)
     // Note: Since we are using an iframe for the DT, we need to pass props via postMessage or URL params if possible,
@@ -189,11 +231,7 @@ function Dashboard() {
                             viewMode={viewMode}
                             isolatedMeshName={null}
                             onExpandClick={(meshName, isAnomaly) => {
-                                setSelectedAsset(meshName)
-                                setViewMode('details')
-                                if (isAnomaly) {
-                                    setAutoTriggerAnomaly(true)
-                                }
+                                expandAsset(meshName, isAnomaly)
                             }}
                             onCreateWorkOrder={(meshName) => {
                                 setPendingCreateWorkOrder({
@@ -221,7 +259,8 @@ function Dashboard() {
                     onAnomalyTriggered={() => setAutoTriggerAnomaly(false)}
                     onSelectAsset={(id) => {
                         setSelectedAsset(id)
-                        // If user clicks tree, trigger isolation logic too
+                        screenCtx.setSelectedTeam(id, formatMeshName(id))
+                        window.history.replaceState(null, '', `?${TEAM_URL_PARAM}=${encodeURIComponent(id)}`)
                     }}
                     setActiveModule={setActiveModule}
                 />
@@ -242,10 +281,7 @@ function Dashboard() {
                 {
                     viewMode === 'details' && (
                         <button
-                            onClick={() => {
-                                setViewMode('overview')
-                                setSelectedAsset(null)
-                            }}
+                            onClick={collapseView}
                             className="absolute top-2 right-2 z-50 bg-zinc-800 hover:bg-zinc-700 text-white p-2 rounded shadow border border-zinc-600"
                         >
                             <Minimize2 size={16} />

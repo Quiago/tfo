@@ -16,6 +16,7 @@ import {
     Activity,
     AlertTriangle,
     Bot,
+    CalendarRange,
     Camera,
     Clock,
     Maximize2,
@@ -23,14 +24,16 @@ import {
     Package,
     Plug2,
     User,
+    X,
     Zap,
 } from 'lucide-react';
-import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
     Area,
     CartesianGrid,
     ComposedChart,
     Line,
+    ReferenceArea,
     ResponsiveContainer,
     Scatter,
     ScatterChart,
@@ -38,10 +41,19 @@ import {
     XAxis,
     YAxis,
 } from 'recharts';
+import { useScreenContext, type DateRange } from '@/lib/store/screen-context-store';
 import { ChartDefs } from './ChartDefs';
 
 // ─── CONSTANTS ──────────────────────────────────────────────────────────────
 const COMMON_Y_AXIS_WIDTH = 80;
+
+// Date-range selection visual tokens
+const RANGE_FILL_SELECTING  = 'rgba(56,189,248,0.18)';
+const RANGE_FILL_COMMITTED  = 'rgba(56,189,248,0.08)';
+const RANGE_STROKE          = '#38bdf8';
+const RANGE_STROKE_WIDTH    = 1.5;
+const RANGE_DASH_COMMITTED  = '4 2';
+const MIN_RANGE_MS          = 1_000; // smallest committable drag (1 s)
 const ACTION_CATEGORIES = [
     'Compliance',
     'Inspection',
@@ -368,6 +380,22 @@ function xTicks(domain: [number, number], count = 5): number[] {
     );
 }
 
+// ─── RANGE SELECTION ─────────────────────────────────────────────────────────
+//
+// Passed down from MultiLayerTimeline to every chart layer so that:
+//   • All layers share the same selection (one drag shows highlight everywhere)
+//   • Mouse events are centralised — only one handler set, no duplication
+//
+interface RangeConfig {
+    /** The range to visualise (live preview during drag OR committed range). */
+    displayRange: DateRange | null;
+    /** True while the user is actively dragging — changes stroke style. */
+    isSelecting: boolean;
+    onMouseDown: (e: any) => void;
+    onMouseMove: (e: any) => void;
+    onMouseUp: () => void;
+}
+
 // ─── BASE CHART COMPONENT ────────────────────────────────────────────────────
 //
 // Single source of truth for XAxis domain/ticks/styling and CartesianGrid.
@@ -384,6 +412,7 @@ interface TimelineChartBaseProps {
     yDomain: [number | 'auto', number | 'auto'];
     yTickFormatter?: (v: number) => string;
     children: ReactNode; // Tooltip + series + optional extra YAxis
+    rangeConfig?: RangeConfig;
 }
 
 const TimelineChartBase = memo(function TimelineChartBase({
@@ -394,11 +423,19 @@ const TimelineChartBase = memo(function TimelineChartBase({
     yDomain,
     yTickFormatter,
     children,
+    rangeConfig,
 }: TimelineChartBaseProps) {
     const ticks = useMemo(() => xTicks(xDomain), [xDomain]);
     return (
         <ResponsiveContainer width="100%" height={height} minWidth={0}>
-            <ComposedChart data={data} margin={{ top: 5, right: 20, bottom: 0, left: 0 }}>
+            <ComposedChart
+                data={data}
+                margin={{ top: 5, right: 20, bottom: 0, left: 0 }}
+                onMouseDown={rangeConfig?.onMouseDown}
+                onMouseMove={rangeConfig?.onMouseMove}
+                onMouseUp={rangeConfig?.onMouseUp}
+                style={rangeConfig ? { cursor: rangeConfig.isSelecting ? 'crosshair' : 'col-resize' } : undefined}
+            >
                 <ChartDefs />
                 <CartesianGrid strokeDasharray="2 4" stroke="#98A6D4" strokeOpacity={0.3} />
                 <XAxis
@@ -421,6 +458,17 @@ const TimelineChartBase = memo(function TimelineChartBase({
                     tickFormatter={yTickFormatter}
                 />
                 {children}
+                {rangeConfig?.displayRange && (
+                    <ReferenceArea
+                        x1={rangeConfig.displayRange.start}
+                        x2={rangeConfig.displayRange.end}
+                        fill={rangeConfig.isSelecting ? RANGE_FILL_SELECTING : RANGE_FILL_COMMITTED}
+                        stroke={RANGE_STROKE}
+                        strokeWidth={RANGE_STROKE_WIDTH}
+                        strokeDasharray={rangeConfig.isSelecting ? undefined : RANGE_DASH_COMMITTED}
+                        ifOverflow="visible"
+                    />
+                )}
             </ComposedChart>
         </ResponsiveContainer>
     );
@@ -437,6 +485,7 @@ const SensorLayer = memo(function SensorLayer({
     expanded,
     visibleSensors,
     signalMeta,
+    rangeConfig,
 }: {
     data: SensorReading[];
     xDomain: [number, number];
@@ -444,6 +493,7 @@ const SensorLayer = memo(function SensorLayer({
     expanded: boolean;
     visibleSensors: Record<string, boolean>;
     signalMeta: SignalMeta[];
+    rangeConfig?: RangeConfig;
 }) {
     const height = expanded ? 300 : 100;
     const chartData = useMemo(() => data.map((s) => ({
@@ -461,6 +511,7 @@ const SensorLayer = memo(function SensorLayer({
                 height={height}
                 yDomain={[0, 100]}
                 yTickFormatter={(v) => `${v}%`}
+                rangeConfig={rangeConfig}
             >
                 <Tooltip content={tooltipRenderer} wrapperStyle={{ zIndex: 50 }} />
                 {visibleSensors.pressure    && <Area isAnimationActive={false} type="monotone" dataKey="pressure"    stroke="#A9FFB5" strokeWidth={2} fill="url(#gradient-pressure)"    dot={false} />}
@@ -496,11 +547,13 @@ const EnergyLayer = memo(function EnergyLayer({
     xDomain,
     granularity,
     expanded,
+    rangeConfig,
 }: {
     data: EnergyReading[];
     xDomain: [number, number];
     granularity: TimeGranularity;
     expanded: boolean;
+    rangeConfig?: RangeConfig;
 }) {
     const height = expanded ? 300 : 100;
     const yDomain = useMemo((): [number, number] => {
@@ -510,7 +563,7 @@ const EnergyLayer = memo(function EnergyLayer({
     }, [data]);
 
     return (
-        <TimelineChartBase data={data} xDomain={xDomain} granularity={granularity} height={height} yDomain={yDomain}>
+        <TimelineChartBase data={data} xDomain={xDomain} granularity={granularity} height={height} yDomain={yDomain} rangeConfig={rangeConfig}>
             <Tooltip content={<EnergyTooltip />} wrapperStyle={{ zIndex: 50 }} />
             <Area isAnimationActive={false} type="monotone" dataKey="powerDraw" stroke="#fbbf24" strokeWidth={2} fill="url(#gradient-power)" dot={false} activeDot={{ r: 4, fill: '#fbbf24', stroke: '#fff', strokeWidth: 2 }} />
             {expanded && <Area isAnimationActive={false} type="monotone" dataKey="coolingLoad" stroke="#fb923c" strokeWidth={2} strokeDasharray="3 3" fill="url(#gradient-cooling)" dot={false} />}
@@ -524,11 +577,13 @@ const ActionsLayer = memo(function ActionsLayer({
     xDomain,
     granularity,
     expanded,
+    rangeConfig,
 }: {
     data: ActionEvent[];
     xDomain: [number, number];
     granularity: TimeGranularity;
     expanded: boolean;
+    rangeConfig?: RangeConfig;
 }) {
     const height = expanded ? 300 : 160;
 
@@ -541,7 +596,13 @@ const ActionsLayer = memo(function ActionsLayer({
 
     return (
         <ResponsiveContainer width="100%" height={height} minWidth={0}>
-            <ScatterChart margin={{ top: 5, right: 20, bottom: 20, left: 0 }}>
+            <ScatterChart
+                margin={{ top: 5, right: 20, bottom: 20, left: 0 }}
+                onMouseDown={rangeConfig?.onMouseDown}
+                onMouseMove={rangeConfig?.onMouseMove}
+                onMouseUp={rangeConfig?.onMouseUp}
+                style={rangeConfig ? { cursor: rangeConfig.isSelecting ? 'crosshair' : 'col-resize' } : undefined}
+            >
                 <CartesianGrid strokeDasharray="2 4" stroke="#98A6D4" strokeOpacity={0.3} />
                 <XAxis
                     dataKey="timestamp"
@@ -567,6 +628,17 @@ const ActionsLayer = memo(function ActionsLayer({
                 />
                 <Tooltip content={<ActionTooltip />} wrapperStyle={{ zIndex: 50 }} />
                 <ChartDefs />
+                {rangeConfig?.displayRange && (
+                    <ReferenceArea
+                        x1={rangeConfig.displayRange.start}
+                        x2={rangeConfig.displayRange.end}
+                        fill={rangeConfig.isSelecting ? RANGE_FILL_SELECTING : RANGE_FILL_COMMITTED}
+                        stroke={RANGE_STROKE}
+                        strokeWidth={RANGE_STROKE_WIDTH}
+                        strokeDasharray={rangeConfig.isSelecting ? undefined : RANGE_DASH_COMMITTED}
+                        ifOverflow="visible"
+                    />
+                )}
                 <Scatter
                     data={chartData}
                     dataKey="categoryY"
@@ -611,11 +683,13 @@ const ProductLayer = memo(function ProductLayer({
     xDomain,
     granularity,
     expanded,
+    rangeConfig,
 }: {
     data: ProductMetric[];
     xDomain: [number, number];
     granularity: TimeGranularity;
     expanded: boolean;
+    rangeConfig?: RangeConfig;
 }) {
     const height = expanded ? 300 : 100;
     const yDomain = useMemo((): [number, number] => {
@@ -625,7 +699,7 @@ const ProductLayer = memo(function ProductLayer({
     }, [data]);
 
     return (
-        <TimelineChartBase data={data} xDomain={xDomain} granularity={granularity} height={height} yDomain={yDomain} yTickFormatter={formatNumber}>
+        <TimelineChartBase data={data} xDomain={xDomain} granularity={granularity} height={height} yDomain={yDomain} yTickFormatter={formatNumber} rangeConfig={rangeConfig}>
             <Tooltip content={<ProductTooltip />} wrapperStyle={{ zIndex: 50 }} />
             <Area isAnimationActive={false} type="monotone" dataKey="target" fill="#a78bfa10" stroke="#a78bfa" strokeWidth={1} strokeDasharray="4 4" dot={false} />
             <Area isAnimationActive={false} type="monotone" dataKey="output" stroke="#a78bfa" strokeWidth={2} fill="url(#gradient-product)" dot={false} activeDot={{ r: 4, fill: '#a78bfa', stroke: '#fff', strokeWidth: 2 }} />
@@ -881,6 +955,88 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
 
     const [modalOpen, setModalOpen] = useState(false);
 
+    // ── Sync timeline state to screen context (AI awareness) ─────────────────
+    const screenCtx = useScreenContext();
+
+    useEffect(() => {
+        screenCtx.setActiveConnectorId(activeConnectorId);
+    }, [activeConnectorId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    useEffect(() => {
+        screenCtx.setGranularity(granularity);
+    }, [granularity]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // ── Date-range selection ─────────────────────────────────────────────────
+    const [isRangeMode, setIsRangeMode] = useState(false);
+    const [rangeStart, setRangeStart] = useState<number | null>(null);
+    const [rangeCurrent, setRangeCurrent] = useState<number | null>(null);
+    const [committedRange, setCommittedRange] = useState<DateRange | null>(null);
+    const isSelectingRef = useRef(false);
+
+    // Live preview during drag; falls back to committed range once drag ends
+    const displayRange = useMemo((): DateRange | null => {
+        if (isSelectingRef.current && rangeStart !== null && rangeCurrent !== null) {
+            return {
+                start: Math.min(rangeStart, rangeCurrent),
+                end:   Math.max(rangeStart, rangeCurrent),
+            };
+        }
+        return committedRange;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [rangeStart, rangeCurrent, committedRange]);
+
+    const handleChartMouseDown = useCallback((e: any) => {
+        if (!isRangeMode || !e?.activeLabel) return;
+        isSelectingRef.current = true;
+        const ts = Number(e.activeLabel);
+        setRangeStart(ts);
+        setRangeCurrent(ts);
+    }, [isRangeMode]);
+
+    const handleChartMouseMove = useCallback((e: any) => {
+        if (!isRangeMode || !isSelectingRef.current || !e?.activeLabel) return;
+        setRangeCurrent(Number(e.activeLabel));
+    }, [isRangeMode]);
+
+    const handleChartMouseUp = useCallback(() => {
+        if (!isRangeMode || !isSelectingRef.current) return;
+        isSelectingRef.current = false;
+        if (rangeStart !== null && rangeCurrent !== null) {
+            const start = Math.min(rangeStart, rangeCurrent);
+            const end   = Math.max(rangeStart, rangeCurrent);
+            if (end - start >= MIN_RANGE_MS) {
+                const range: DateRange = { start, end };
+                setCommittedRange(range);
+                screenCtx.setDateRange(range);
+            }
+        }
+        setRangeStart(null);
+        setRangeCurrent(null);
+    }, [isRangeMode, rangeStart, rangeCurrent, screenCtx]);
+
+    const clearRange = useCallback(() => {
+        setCommittedRange(null);
+        setRangeStart(null);
+        setRangeCurrent(null);
+        isSelectingRef.current = false;
+        screenCtx.setDateRange(null);
+    }, [screenCtx]);
+
+    const toggleRangeMode = useCallback(() => {
+        setIsRangeMode((prev) => {
+            if (prev) clearRange(); // exiting range mode → clear selection
+            return !prev;
+        });
+    }, [clearRange]);
+
+    const rangeConfig: RangeConfig = useMemo(() => ({
+        displayRange,
+        isSelecting: isSelectingRef.current,
+        onMouseDown: handleChartMouseDown,
+        onMouseMove: handleChartMouseMove,
+        onMouseUp:   handleChartMouseUp,
+    }), [displayRange, handleChartMouseDown, handleChartMouseMove, handleChartMouseUp]);
+
     // Effect to handle auto-trigger from parent
     useEffect(() => {
         if (autoTriggerAnomaly) {
@@ -1055,6 +1211,39 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
                             ))}
                         </div>
 
+                        {/* Date-range selection toggle */}
+                        <button
+                            onClick={toggleRangeMode}
+                            title={isRangeMode ? 'Exit range mode' : 'Select a time range by dragging on any chart'}
+                            className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded border transition-all ${
+                                isRangeMode
+                                    ? 'border-sky-400 text-sky-300 bg-sky-500/10 hover:bg-sky-500/20'
+                                    : 'border-zinc-600 text-zinc-400 hover:border-zinc-400 hover:text-zinc-200'
+                            }`}
+                        >
+                            <CalendarRange size={13} />
+                            {isRangeMode ? 'Cancel' : 'Range'}
+                        </button>
+
+                        {/* Committed range badge */}
+                        {committedRange && !isRangeMode && (
+                            <div className="flex items-center gap-1.5 px-2 py-1.5 text-xs bg-sky-500/10 border border-sky-500/30 rounded text-sky-300 font-mono">
+                                <CalendarRange size={10} />
+                                <span>
+                                    {new Date(committedRange.start).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                    {' → '}
+                                    {new Date(committedRange.end).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                                <button
+                                    onClick={clearRange}
+                                    className="ml-1 hover:text-white transition-colors"
+                                    title="Clear range"
+                                >
+                                    <X size={10} />
+                                </button>
+                            </div>
+                        )}
+
                         {/* Add / swap connector */}
                         <button
                             onClick={() => setModalOpen(true)}
@@ -1134,6 +1323,7 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
                                 xDomain={xDomain}
                                 granularity={granularity}
                                 expanded={expandedLayer === 'product'}
+                                rangeConfig={isRangeMode || committedRange ? rangeConfig : undefined}
                             />
                         </div>
                     )}
@@ -1189,6 +1379,7 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
                                     expanded={expandedLayer === 'sensors'}
                                     visibleSensors={visibleSensors}
                                     signalMeta={signalMeta}
+                                    rangeConfig={isRangeMode || committedRange ? rangeConfig : undefined}
                                 />
                             </div>
                         </>
@@ -1228,6 +1419,7 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
                                 xDomain={xDomain}
                                 granularity={granularity}
                                 expanded={expandedLayer === 'energy'}
+                                rangeConfig={isRangeMode || committedRange ? rangeConfig : undefined}
                             />
                         </div>
                     )}
@@ -1264,6 +1456,7 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
                                 xDomain={xDomain}
                                 granularity={granularity}
                                 expanded={expandedLayer === 'actions'}
+                                rangeConfig={isRangeMode || committedRange ? rangeConfig : undefined}
                             />
                         </div>
                     )}
@@ -1294,7 +1487,9 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
                     </span>
                 </div>
                 <div className="text-xs text-slate-500">
-                    Click layer name to expand · Hover for details
+                    {isRangeMode
+                        ? 'Click and drag on any chart to select a time range'
+                        : 'Click layer name to expand · Hover for details · Range to analyse a period'}
                 </div>
             </div>
         </div>

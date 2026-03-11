@@ -52,6 +52,15 @@ const ProgressBar = ({ value, color, label }: { value: number, color: string, la
     </div>
 )
 
+/** Convert raw mesh/asset IDs like "KUKA_Robot_Arm" → "KUKA Robot Arm". */
+function formatAssetName(raw: string): string {
+    return raw
+        .replace(/[_-]/g, ' ')
+        .replace(/([a-z])([A-Z])/g, '$1 $2')
+        .replace(/\b\w/g, (c) => c.toUpperCase())
+        .trim();
+}
+
 export function RichMachineSummary({ selectedAsset }: { selectedAsset?: string | null }) {
     const allWorkOrders = useOpshubStore(s => s.workOrders)
 
@@ -102,8 +111,23 @@ export function RichMachineSummary({ selectedAsset }: { selectedAsset?: string |
         })
     }
 
+    const teamName = selectedAsset ? formatAssetName(selectedAsset) : null;
+
     return (
         <div className={s.summaryCard}>
+            {/* Team / Equipment name badge */}
+            {teamName && (
+                <div className="flex items-center gap-2 mb-2 px-0.5 flex-shrink-0">
+                    <div className="w-1 h-4 bg-cyan-500 rounded-full flex-shrink-0" />
+                    <span className="text-sm font-bold text-[var(--tp-text-heading)] truncate leading-none">
+                        {teamName}
+                    </span>
+                    <span className="text-[9px] font-semibold text-[var(--tp-text-muted)] uppercase tracking-widest ml-0.5 flex-shrink-0">
+                        in focus
+                    </span>
+                </div>
+            )}
+
             {/* Top Row: Stats Grid - 60% height */}
             <div className="grid grid-cols-4 gap-2 h-[60%] min-h-0">
                 {/* 1. Health */}
