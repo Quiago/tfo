@@ -1,6 +1,7 @@
 'use client';
 
 import { useConnectorTimeline, type ConnectorStatus, type NodeMapping } from '@/lib/hooks/useConnectorTimeline';
+import type { SignalMeta } from '@/lib/types/timeline';
 import { ConnectorModal } from './ConnectorModal';
 import type {
     ActionEvent,
@@ -102,83 +103,89 @@ function normalizeForDisplay(
 }
 
 // ─── CUSTOM TOOLTIPS ────────────────────────────────────────────────────────
-const SensorTooltip = ({ active, payload }: any) => {
-    if (!active || !payload?.length) return null;
-    const d = payload[0]?.payload as SensorReading;
-    if (!d) return null;
 
-    return (
-        <div className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 shadow-xl text-xs">
-            <p className="text-slate-400 mb-1">
-                {new Date(d.timestamp).toLocaleString()}
-            </p>
-
-            {/* Vibration */}
-            <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-orange-400 inline-block" />
-                <span className="text-slate-300">Vibration:</span>
-                <span className={`font-semibold ${d.vibration > 12 ? 'text-red-400' :
-                    d.vibration > 8 ? 'text-amber-400' :
-                        'text-white'
-                    }`}>
-                    {d.vibration.toFixed(1)} mm/s
-                </span>
-            </div>
-
-            {/* Temperature */}
-            <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
-                <span className="text-slate-300">Temperature:</span>
-                <span className={`font-semibold ${d.temperature > 50 ? 'text-red-400' :
-                    d.temperature > 45 ? 'text-amber-400' :
-                        'text-white'
-                    }`}>
-                    {d.temperature.toFixed(1)}°C
-                </span>
-            </div>
-
-            {/* Humidity */}
-            <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-blue-400 inline-block" />
-                <span className="text-slate-300">Humidity:</span>
-                <span className={`font-semibold ${d.humidity > 70 ? 'text-red-400' :
-                    d.humidity > 65 ? 'text-amber-400' :
-                        'text-white'
-                    }`}>
-                    {d.humidity.toFixed(1)}%
-                </span>
-            </div>
-
-            {/* Pressure */}
-            <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-violet-500 inline-block" />
-                <span className="text-slate-300">Pressure:</span>
-                <span className={`font-semibold ${d.pressure < 4 ? 'text-red-400' :
-                    d.pressure < 5.5 ? 'text-amber-400' :
-                        'text-white'
-                    }`}>
-                    {d.pressure.toFixed(1)} bar
-                </span>
-            </div>
-
-            {d.videoFrame && (
-                <div className="flex items-center gap-2 mt-1">
-                    <Camera size={10} className="text-slate-400" />
-                    <span className="text-slate-300">{d.videoFrame.zone}</span>
-                    {d.videoFrame.hasMotion && (
-                        <span className="text-emerald-400 text-[10px]">Motion</span>
-                    )}
-                </div>
-            )}
-
-            {d.anomaly && (
-                <div className="flex items-center gap-1 mt-1 text-amber-400">
-                    <AlertTriangle size={10} /> <span>Anomaly detected</span>
-                </div>
-            )}
-        </div>
-    );
+// Colors per field (stable — used in tooltip dots and filter bar)
+const FIELD_COLORS: Record<string, string> = {
+    vibration:   'bg-orange-400',
+    temperature: 'bg-emerald-400',
+    humidity:    'bg-blue-400',
+    pressure:    'bg-violet-500',
 };
+
+// Default fallback metadata when DB data is not yet available
+const DEFAULT_META: Record<string, { displayName: string; unit: string }> = {
+    temperature: { displayName: 'Temperature',  unit: '°C'   },
+    vibration:   { displayName: 'Vibration',    unit: 'mm/s' },
+    pressure:    { displayName: 'Pressure',     unit: 'bar'  },
+    humidity:    { displayName: 'Humidity',     unit: '%'    },
+};
+
+// Raw field key for each chart field
+const RAW_FIELD: Record<string, keyof SensorReading> = {
+    temperature: 'rawTemperature',
+    vibration:   'rawVibration',
+    pressure:    'rawPressure',
+    humidity:    'rawHumidity',
+};
+
+function makeSensorTooltip(signalMeta: SignalMeta[]) {
+    const metaByField = Object.fromEntries(signalMeta.map((m) => [m.field, m]));
+
+    return function SensorTooltip({ active, payload }: any) {
+        if (!active || !payload?.length) return null;
+        const d = payload[0]?.payload as SensorReading;
+        if (!d) return null;
+
+        // Render each channel in a consistent order
+        const fields = ['vibration', 'temperature', 'humidity', 'pressure'] as const;
+
+        return (
+            <div className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 shadow-xl text-xs">
+                <p className="text-slate-400 mb-1">
+                    {new Date(d.timestamp).toLocaleString()}
+                </p>
+
+                {fields.map((field) => {
+                    const meta = metaByField[field] ?? DEFAULT_META[field];
+                    const displayName = meta?.displayName ?? DEFAULT_META[field].displayName;
+                    const unit = meta?.unit ?? DEFAULT_META[field].unit;
+                    const rawKey = RAW_FIELD[field];
+                    const rawVal = d[rawKey] as number | null | undefined;
+                    const dotColor = FIELD_COLORS[field] ?? 'bg-slate-400';
+
+                    // Use raw engineering value when available; fall back to normalized + label
+                    const valueStr = rawVal != null
+                        ? `${rawVal.toFixed(2)} ${unit}`
+                        : `${(d[field] as number).toFixed(1)}% (norm)`;
+
+                    return (
+                        <div key={field} className="flex items-center gap-2">
+                            <span className={`w-2 h-2 rounded-full ${dotColor} inline-block`} />
+                            <span className="text-slate-300">{displayName}:</span>
+                            <span className="font-semibold text-white">{valueStr}</span>
+                        </div>
+                    );
+                })}
+
+                {d.videoFrame && (
+                    <div className="flex items-center gap-2 mt-1">
+                        <Camera size={10} className="text-slate-400" />
+                        <span className="text-slate-300">{d.videoFrame.zone}</span>
+                        {d.videoFrame.hasMotion && (
+                            <span className="text-emerald-400 text-[10px]">Motion</span>
+                        )}
+                    </div>
+                )}
+
+                {d.anomaly && (
+                    <div className="flex items-center gap-1 mt-1 text-amber-400">
+                        <AlertTriangle size={10} /> <span>Anomaly detected</span>
+                    </div>
+                )}
+            </div>
+        );
+    };
+}
 
 const EnergyTooltip = ({ active, payload }: any) => {
     if (!active || !payload?.length) return null;
@@ -385,12 +392,14 @@ const SensorLayer = memo(function SensorLayer({
     granularity,
     expanded,
     visibleSensors,
+    signalMeta,
 }: {
     data: SensorReading[];
     xDomain: [number, number];
     granularity: TimeGranularity;
     expanded: boolean;
     visibleSensors: Record<string, boolean>;
+    signalMeta: SignalMeta[];
 }) {
     const height = expanded ? 300 : 100;
 
@@ -402,6 +411,9 @@ const SensorLayer = memo(function SensorLayer({
     })), [data]);
 
     const ticks = useMemo(() => xTicks(xDomain), [xDomain]);
+
+    // Tooltip is created once per signalMeta change via factory (avoids closure stale data)
+    const TooltipContent = useMemo(() => makeSensorTooltip(signalMeta), [signalMeta]);
 
     return (
         <div>
@@ -431,7 +443,7 @@ const SensorLayer = memo(function SensorLayer({
                         width={COMMON_Y_AXIS_WIDTH}
                         tickFormatter={(v: number) => `${v}%`}
                     />
-                    <Tooltip content={<SensorTooltip />} wrapperStyle={{ zIndex: 50 }} />
+                    <Tooltip content={<TooltipContent />} wrapperStyle={{ zIndex: 50 }} />
 
                     {visibleSensors.pressure    && <Area isAnimationActive={false} type="monotone" dataKey="pressure"    stroke="#A9FFB5" strokeWidth={2} fill="url(#gradient-pressure)"    dot={false} />}
                     {visibleSensors.temperature && <Area isAnimationActive={false} type="monotone" dataKey="temperature" stroke="#FFCEBD" strokeWidth={2} fill="url(#gradient-temperature)" dot={false} />}
@@ -953,6 +965,7 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
         connectorStatus,
         connectorError,
         nodeMappings,
+        signalMeta,
     } = useConnectorTimeline(activeConnectorId, granularity);
 
     // Live actions are not yet wired to the connector — placeholder for future integration
@@ -1196,18 +1209,19 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
                         onToggleExpand={() => handleToggleExpand('sensors')}
                         stats={latestSensor && (
                             <div className="flex items-center gap-4 text-xs">
-                                <span className="text-emerald-600 font-mono">
-                                    {latestSensor.temperature}°C
-                                </span>
-                                <span className={`font-mono ${latestSensor.pressure < 4 ? 'text-red-600' :
-                                    latestSensor.pressure < 5.5 ? 'text-amber-600' :
-                                        'text-slate-600'
-                                    }`}>
-                                    Press {latestSensor.pressure.toFixed(1)} bar
-                                </span>
-                                <span className="text-orange-600 font-mono">
-                                    Vib {latestSensor.vibration.toFixed(1)} mm/s
-                                </span>
+                                {(() => {
+                                    const tMeta = signalMeta.find((m) => m.field === 'temperature') ?? { displayName: 'Temp', unit: '°C' };
+                                    const pMeta = signalMeta.find((m) => m.field === 'pressure')    ?? { displayName: 'Press', unit: 'bar' };
+                                    const vMeta = signalMeta.find((m) => m.field === 'vibration')   ?? { displayName: 'Vib', unit: 'mm/s' };
+                                    const tVal = latestSensor.rawTemperature != null ? `${latestSensor.rawTemperature.toFixed(1)} ${tMeta.unit}` : `${latestSensor.temperature.toFixed(0)}%`;
+                                    const pVal = latestSensor.rawPressure    != null ? `${latestSensor.rawPressure.toFixed(2)} ${pMeta.unit}`    : `${latestSensor.pressure.toFixed(1)}%`;
+                                    const vVal = latestSensor.rawVibration   != null ? `${latestSensor.rawVibration.toFixed(2)} ${vMeta.unit}`   : `${latestSensor.vibration.toFixed(1)}%`;
+                                    return (<>
+                                        <span className="text-emerald-600 font-mono">{tVal}</span>
+                                        <span className="text-slate-600 font-mono">{pMeta.displayName} {pVal}</span>
+                                        <span className="text-orange-600 font-mono">{vMeta.displayName} {vVal}</span>
+                                    </>);
+                                })()}
                                 {anomalyCount > 0 && (
                                     <span className="text-amber-600 flex items-center gap-1">
                                         <AlertTriangle size={12} /> {anomalyCount}
@@ -1231,6 +1245,7 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
                                     granularity={granularity}
                                     expanded={expandedLayer === 'sensors'}
                                     visibleSensors={visibleSensors}
+                                    signalMeta={signalMeta}
                                 />
                             </div>
                         </>

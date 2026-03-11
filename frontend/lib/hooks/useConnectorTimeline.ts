@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { discoverConnector, readConnectorBatch } from '@/lib/services/connector.service';
-import { getTelemetryTimeline } from '@/lib/services/telemetry.service';
+import { getChannelMetadata, getTelemetryTimeline } from '@/lib/services/telemetry.service';
 import { ApiError } from '@/lib/services/backend';
 import type {
     EnergyReading,
     ProductMetric,
     SensorReading,
+    SignalMeta,
     TimeGranularity,
 } from '@/lib/types/timeline';
 
@@ -54,9 +55,31 @@ const GRANULARITY_CONFIG: Record<TimeGranularity, { windowMs: number; bucketMs: 
     Year:   { windowMs: 600_000,  bucketMs: 120_000 },  // last 10 min — 2 min buckets
 };
 
-const MAX_BUFFER            = 300;  // 300 × 2s = 10 min of raw readings
+const MAX_BUFFER             = 300;  // 300 × 2s = 10 min of raw readings
 const MAX_CONSECUTIVE_ERRORS = 4;
-const NORMALIZE_WINDOW      = 60;   // readings used for rolling min/max per channel
+const NORMALIZE_WINDOW       = 60;   // readings used for rolling min/max per channel
+
+// ─── DISCOVERY CACHE (localStorage) ──────────────────────────────────────────
+//
+// Discovery is expensive (OPC UA tree walk). We cache the node mappings per
+// connector so subsequent connects skip the tree walk entirely.
+
+function loadCachedMappings(connectorId: string): NodeMapping[] | null {
+    try {
+        const raw = localStorage.getItem(`node_mappings_${connectorId}`);
+        return raw ? (JSON.parse(raw) as NodeMapping[]) : null;
+    } catch {
+        return null;
+    }
+}
+
+function saveMappings(connectorId: string, mappings: NodeMapping[]): void {
+    try {
+        localStorage.setItem(`node_mappings_${connectorId}`, JSON.stringify(mappings));
+    } catch {
+        // localStorage unavailable (SSR, private mode) — non-fatal
+    }
+}
 
 // ─── NORMALIZATION ────────────────────────────────────────────────────────────
 //
@@ -99,6 +122,11 @@ function avgArr(arr: number[]): number {
 // anomaly  = OR across the bucket (any spike marks the whole bucket).
 // bucketMs = 0  → return raw readings filtered to the window.
 
+function avgNullable(arr: (number | null | undefined)[]): number | null {
+    const vals = arr.filter((v): v is number => v != null);
+    return vals.length ? avgArr(vals) : null;
+}
+
 function aggregateToBuckets(
     readings: SensorReading[],
     bucketMs: number,
@@ -117,11 +145,16 @@ function aggregateToBuckets(
     return Array.from(buckets.entries())
         .sort(([a], [b]) => a - b)
         .map(([key, group]) => ({
-            timestamp:   key + bucketMs / 2,  // midpoint of bucket
-            temperature: avgArr(group.map((r) => r.temperature)),
-            vibration:   avgArr(group.map((r) => r.vibration)),
-            pressure:    avgArr(group.map((r) => r.pressure)),
-            humidity:    avgArr(group.map((r) => r.humidity)),
+            timestamp:        key + bucketMs / 2,
+            temperature:      avgArr(group.map((r) => r.temperature)),
+            vibration:        avgArr(group.map((r) => r.vibration)),
+            pressure:         avgArr(group.map((r) => r.pressure)),
+            humidity:         avgArr(group.map((r) => r.humidity)),
+            // Average raw values for the bucket (null when not available)
+            rawTemperature:   avgNullable(group.map((r) => r.rawTemperature)),
+            rawVibration:     avgNullable(group.map((r) => r.rawVibration)),
+            rawPressure:      avgNullable(group.map((r) => r.rawPressure)),
+            rawHumidity:      avgNullable(group.map((r) => r.rawHumidity)),
             anomaly:     group.some((r) => r.anomaly),
             alertLevel:  group.reduce<SensorReading['alertLevel']>(
                 (worst, r) =>
@@ -167,6 +200,7 @@ export function useConnectorTimeline(
     const [status, setStatus]             = useState<ConnectorStatus>(connectorId ? 'discovering' : 'idle');
     const [errorDetail, setErrorDetail]   = useState<string | null>(null);
     const [nodeMappings, setNodeMappings]  = useState<NodeMapping[]>([]);
+    const [signalMeta, setSignalMeta]      = useState<SignalMeta[]>([]);
     const [sensorBuffer, setSensorBuffer]  = useState<SensorReading[]>([]);
 
     const nodeIdsRef           = useRef<string[]>([]);
@@ -191,6 +225,7 @@ export function useConnectorTimeline(
         setStatus('discovering');
         setErrorDetail(null);
         setNodeMappings([]);
+        setSignalMeta([]);
         setSensorBuffer([]);
         connectedRef.current = false;
         consecutiveErrorsRef.current = 0;
@@ -198,63 +233,87 @@ export function useConnectorTimeline(
         let cancelled = false;
 
         async function init() {
-            try {
-                const discovery = await discoverConnector(connectorId!);
-                if (cancelled) return;
+            // ── Node mapping: use localStorage cache to skip re-discovery ──────
+            const cached = loadCachedMappings(connectorId!);
+            if (cached && cached.length > 0) {
+                // Connector was used before — reuse known node IDs
+                nodeIdsRef.current = cached.map((m) => m.nodeId);
+                setNodeMappings(cached);
+                console.log('[Connector] Using cached node mappings for', connectorId, '— skipping discovery');
+            } else {
+                // First time this connector is used — run full OPC UA discovery
+                try {
+                    const discovery = await discoverConnector(connectorId!);
+                    if (cancelled) return;
 
-                // Prefer known-numeric nodes; fall back to Unknown-type; last resort: any node.
-                // This matches the discovery behaviour that worked before strict filtering was added.
-                const numericNodes = discovery.nodes.filter(
-                    (n) => NUMERIC_DATA_TYPES.has(n.data_type) || n.data_type === 'Unknown',
-                );
-                const scored = numericNodes
-                    .filter((n) => n.data_type !== 'Unknown')
-                    .sort((a, b) => {
-                        const score = (n: typeof a) =>
-                            (n.path.some((p) => /static/i.test(p))  ?  1 : 0) +
-                            (n.path.some((p) => /dynamic/i.test(p)) ? -1 : 0);
-                        return score(a) - score(b);
+                    const numericNodes = discovery.nodes.filter(
+                        (n) => NUMERIC_DATA_TYPES.has(n.data_type) || n.data_type === 'Unknown',
+                    );
+                    const scored = numericNodes
+                        .filter((n) => n.data_type !== 'Unknown')
+                        .sort((a, b) => {
+                            const score = (n: typeof a) =>
+                                (n.path.some((p) => /static/i.test(p))  ?  1 : 0) +
+                                (n.path.some((p) => /dynamic/i.test(p)) ? -1 : 0);
+                            return score(a) - score(b);
+                        });
+
+                    const pool = numericNodes.length > 0 ? (scored.length >= 4 ? scored : numericNodes) : discovery.nodes;
+                    const candidates = pool.slice(0, 4);
+                    nodeIdsRef.current = candidates.map((n) => n.node_id);
+
+                    const mappings: NodeMapping[] = candidates.map((n, i) => ({
+                        field:       FIELD_MAP[i],
+                        displayName: n.display_name,
+                        nodeId:      n.node_id,
+                        dataType:    n.data_type,
+                    }));
+                    setNodeMappings(mappings);
+                    // Persist so next time we skip discovery
+                    saveMappings(connectorId!, mappings);
+                    console.log('[Connector] Discovery complete →', {
+                        total: discovery.nodes.length,
+                        numeric: numericNodes.length,
+                        selected: mappings.map((m) => `${m.field}=${m.nodeId} (${m.dataType})`),
                     });
+                } catch (err) {
+                    if (cancelled) return;
+                    console.error('[Connector] discovery failed:', err);
+                    const httpStatus = err instanceof ApiError ? err.status : null;
+                    const detail = err instanceof ApiError
+                        ? `HTTP ${err.status}: ${err.message}`
+                        : (err instanceof Error ? err.message : String(err));
+                    setErrorDetail(detail);
+                    setStatus(httpStatus === 404 ? 'not_found' : 'error');
+                    return;
+                }
 
-                // If the strict numeric filter yields 0 nodes, fall back to ALL nodes
-                // (some OPC-UA servers report data types as non-numeric even for numeric tags).
-                const pool = numericNodes.length > 0 ? (scored.length >= 4 ? scored : numericNodes) : discovery.nodes;
-                const candidates = pool.slice(0, 4);
-                nodeIdsRef.current = candidates.map((n) => n.node_id);
-
-                const mappings: NodeMapping[] = candidates.map((n, i) => ({
-                    field:       FIELD_MAP[i],
-                    displayName: n.display_name,
-                    nodeId:      n.node_id,
-                    dataType:    n.data_type,
-                }));
-                setNodeMappings(mappings);
-                console.log('[Connector] Discovery →', {
-                    total: discovery.nodes.length,
-                    numeric: numericNodes.length,
-                    selected: mappings.map((m) => `${m.field}=${m.nodeId} (${m.dataType})`),
-                });
-            } catch (err) {
-                if (cancelled) return;
-                console.error('[Connector] discovery failed:', err);
-                const httpStatus = err instanceof ApiError ? err.status : null;
-                const detail = err instanceof ApiError
-                    ? `HTTP ${err.status}: ${err.message}`
-                    : (err instanceof Error ? err.message : String(err));
-                setErrorDetail(detail);
-                setStatus(httpStatus === 404 ? 'not_found' : 'error');
-                return;
+                if (nodeIdsRef.current.length === 0) {
+                    const msg = 'No readable nodes found on this connector. Check that the server has tags exposed.';
+                    console.warn('[Connector]', msg);
+                    setErrorDetail(msg);
+                    setStatus('error');
+                    return;
+                }
             }
 
-            if (nodeIdsRef.current.length === 0) {
-                const msg = 'No readable nodes found on this connector. Check that the server has tags exposed.';
-                console.warn('[Connector]', msg);
-                setErrorDetail(msg);
-                setStatus('error');
-                return;
+            // ── Fetch real signal labels + units from DB ───────────────────────
+            try {
+                const channels = await getChannelMetadata();
+                if (!cancelled && channels.length > 0) {
+                    const meta: SignalMeta[] = channels.map((c) => ({
+                        field:       c.field as SignalMeta['field'],
+                        signalId:    c.signal_id,
+                        displayName: c.display_name,
+                        unit:        c.unit,
+                    }));
+                    setSignalMeta(meta);
+                }
+            } catch {
+                // Non-fatal — tooltips will fall back to OPC UA display names
             }
 
-            // Seed prevRaw so the first poll has fallback values
+            // ── Seed prevRaw so the first poll has fallback values ─────────────
             try {
                 const batch = await readConnectorBatch(connectorId!, nodeIdsRef.current);
                 if (cancelled) return;
@@ -271,19 +330,22 @@ export function useConnectorTimeline(
 
             if (cancelled) return;
 
-            // Pre-populate buffer with stored telemetry history so the chart
-            // isn't empty on first render.  Non-fatal: live data fills in anyway.
+            // ── Pre-populate buffer from stored telemetry (with raw values) ────
             try {
                 const history = await getTelemetryTimeline(10);
                 if (!cancelled && history.length > 0) {
                     const seeded: SensorReading[] = history.map((p) => ({
-                        timestamp:  p.timestamp,
-                        temperature: p.temperature,
-                        vibration:   p.vibration,
-                        pressure:    p.pressure,
-                        humidity:    p.humidity,
-                        anomaly:     false,
-                        alertLevel:  'none' as const,
+                        timestamp:      p.timestamp,
+                        temperature:    p.temperature,
+                        vibration:      p.vibration,
+                        pressure:       p.pressure,
+                        humidity:       p.humidity,
+                        rawTemperature: p.rawTemperature ?? null,
+                        rawVibration:   p.rawVibration   ?? null,
+                        rawPressure:    p.rawPressure    ?? null,
+                        rawHumidity:    p.rawHumidity    ?? null,
+                        anomaly:        false,
+                        alertLevel:     'none' as const,
                     }));
                     setSensorBuffer(seeded.slice(-MAX_BUFFER));
                     bufferRef.current = seeded.slice(-MAX_BUFFER);
@@ -370,13 +432,18 @@ export function useConnectorTimeline(
             // Anomaly is NEVER auto-detected from raw values.
             // It is only injected by the TEST ANOMALY button (triggerAnomaly).
             const reading: SensorReading = {
-                timestamp: Date.now(),
+                timestamp:      Date.now(),
                 temperature,
                 vibration,
                 pressure,
                 humidity,
-                anomaly:    false,
-                alertLevel: 'none',
+                // Store raw engineering values for tooltip display
+                rawTemperature: rT,
+                rawVibration:   rV,
+                rawPressure:    rP,
+                rawHumidity:    rH,
+                anomaly:        false,
+                alertLevel:     'none',
             };
 
             setSensorBuffer((prev) => [...prev.slice(-(MAX_BUFFER - 1)), reading]);
@@ -435,5 +502,6 @@ export function useConnectorTimeline(
         connectorStatus: status,
         connectorError:  errorDetail,
         nodeMappings,
+        signalMeta,
     };
 }

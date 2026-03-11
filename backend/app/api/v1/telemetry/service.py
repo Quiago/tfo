@@ -416,6 +416,12 @@ def get_timeline_history(
             return 50.0
         return round(((v - mn) / spread) * 100, 2)
 
+    # Lookup: signal_id → human label + unit (from the first reading found)
+    sig_meta: dict[str, tuple[str, str]] = {}
+    for r in readings:
+        if r.signal_id not in sig_meta:
+            sig_meta[r.signal_id] = (r.display_name, r.unit)
+
     result = []
     for ts_ms in sorted(buckets.keys()):
         bucket = buckets[ts_ms]
@@ -425,7 +431,51 @@ def get_timeline_history(
             if v is None:
                 break
             point[field] = _norm(v, field_vals[field])
+            # Store raw engineering-unit value under camelCase key for tooltip
+            raw_key = "raw" + field[0].upper() + field[1:]
+            point[raw_key] = round(v, 4)
         else:
             result.append(point)
 
+    return result
+
+
+def get_channel_metadata(session: Session) -> list[dict]:
+    """
+    Returns display_name and unit for each of the 4 frontend timeline channels,
+    sourced from the most recent readings stored in the DB.
+
+    Falls back to the static _NODE_INFO catalogue when the DB has no data yet.
+    """
+    # Static fallback from the signal catalogue
+    _FALLBACK: dict[str, tuple[str, str, str]] = {
+        "temperature": _NODE_INFO["Zone1Temperature"],
+        "vibration":   _NODE_INFO["Vibration_X"],
+        "pressure":    _NODE_INFO["LinePressure"],
+        "humidity":    _NODE_INFO["Humidity"],
+    }
+
+    # Fetch latest reading per channel signal_id from DB
+    signal_ids = list(TIMELINE_FIELD_MAP.values())
+    latest = get_latest_readings(session, signal_ids)
+    by_sig = {r.signal_id: r for r in latest}
+
+    result = []
+    for field, sig_id in TIMELINE_FIELD_MAP.items():
+        row = by_sig.get(sig_id)
+        if row:
+            result.append({
+                "field":        field,
+                "signal_id":    sig_id,
+                "display_name": row.display_name,
+                "unit":         row.unit,
+            })
+        else:
+            _, display_name, unit = _FALLBACK[field]
+            result.append({
+                "field":        field,
+                "signal_id":    sig_id,
+                "display_name": display_name,
+                "unit":         unit,
+            })
     return result

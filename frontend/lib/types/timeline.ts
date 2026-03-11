@@ -12,10 +12,16 @@ export type TimeGranularity = 'Minute' | 'Hour' | 'Day' | 'Week' | 'Year';
 // --- SENSOR LAYER ---------------------------------------------------------------
 export interface SensorReading {
   timestamp: number;
-  temperature: number;        // °C machine zone or ambient temp
-  humidity: number;           // % RH (storage/warehouse areas)
-  vibration: number;          // mm/s RMS vibration from accelerometer
-  pressure: number;           // bar compressed air system pressure
+  // Normalized 0–100 values — used for chart Y-axis rendering
+  temperature: number;
+  humidity: number;
+  vibration: number;
+  pressure: number;
+  // Raw engineering-unit values — used for tooltip display (null when not yet available)
+  rawTemperature?: number | null;
+  rawVibration?: number | null;
+  rawPressure?: number | null;
+  rawHumidity?: number | null;
   videoFrame?: {
     frameNumber: number;
     thumbnailColor: string; // hex color representing dominant color of frame
@@ -24,6 +30,14 @@ export interface SensorReading {
   };
   anomaly: boolean;
   alertLevel: 'none' | 'warning' | 'critical';
+}
+
+// Metadata for one of the 4 frontend chart channels (sourced from DB / OPC UA)
+export interface SignalMeta {
+  field: 'temperature' | 'vibration' | 'pressure' | 'humidity';
+  signalId: string;
+  displayName: string;
+  unit: string;
 }
 
 // --- ENERGY LAYER ---------------------------------------------------------------

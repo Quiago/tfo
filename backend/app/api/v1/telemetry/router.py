@@ -20,6 +20,7 @@ from sqlmodel import Session
 
 from app.api.v1.telemetry import service
 from app.api.v1.telemetry.schemas import (
+    ChannelMeta,
     LatestReadingOut,
     SignalHistoryOut,
     SignalStats,
@@ -89,6 +90,16 @@ def signal_stats(
     ids = [s.strip() for s in signal_ids.split(",")]
     stats = service.get_statistics(session, ids, minutes)
     return [SignalStats(**s) for s in stats]
+
+
+@router.get("/channels", response_model=list[ChannelMeta])
+def channel_metadata(session: Session = Depends(get_session)):
+    """
+    Metadata for the 4 frontend chart channels: display name and unit sourced
+    from the latest stored telemetry readings (falls back to static catalogue).
+    Used by the frontend to label tooltips with real OPC UA signal names.
+    """
+    return [ChannelMeta(**c) for c in service.get_channel_metadata(session)]
 
 
 @router.get("/timeline", response_model=list[TimelinePoint])
