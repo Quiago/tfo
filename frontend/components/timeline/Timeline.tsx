@@ -38,7 +38,6 @@ import {
     YAxis,
 } from 'recharts';
 import { ChartDefs } from './ChartDefs';
-import { SensorLayerLW } from './SensorLayerLW';
 
 // ─── CONSTANTS ──────────────────────────────────────────────────────────────
 const COMMON_Y_AXIS_WIDTH = 80;
@@ -368,115 +367,34 @@ function xTicks(domain: [number, number], count = 5): number[] {
     );
 }
 
-const SensorLayer = memo(function SensorLayer({
+// ─── BASE CHART COMPONENT ────────────────────────────────────────────────────
+//
+// Single source of truth for XAxis domain/ticks/styling and CartesianGrid.
+// All 3 ComposedChart layers (Sensor, Energy, Product) extend this — they
+// only supply their own series and Y-axis configuration.
+// This guarantees visual alignment: same time domain, same tick positions,
+// same grid strokes across every layer.
+
+interface TimelineChartBaseProps {
+    data: object[];
+    xDomain: [number, number];
+    granularity: TimeGranularity;
+    height: number;
+    yDomain: [number | 'auto', number | 'auto'];
+    yTickFormatter?: (v: number) => string;
+    children: ReactNode; // Tooltip + series + optional extra YAxis
+}
+
+const TimelineChartBase = memo(function TimelineChartBase({
     data,
     xDomain,
     granularity,
-    expanded,
-    visibleSensors,
-    signalMeta,
-}: {
-    data: SensorReading[];
-    xDomain: [number, number];
-    granularity: TimeGranularity;
-    expanded: boolean;
-    visibleSensors: Record<string, boolean>;
-    signalMeta: SignalMeta[];
-}) {
-    const height = expanded ? 300 : 100;
-
-    // data values are already normalized 0–100 by the hook (windowNormalize).
-    // anomaly_y is only non-null when anomaly===true (manual TEST ANOMALY button).
-    const chartData = useMemo(() => data.map((s) => ({
-        ...s,
-        anomaly_y: s.anomaly ? s.vibration : null,
-    })), [data]);
-
+    height,
+    yDomain,
+    yTickFormatter,
+    children,
+}: TimelineChartBaseProps) {
     const ticks = useMemo(() => xTicks(xDomain), [xDomain]);
-
-    // Pass the render function directly (not <Component />).
-    // This avoids creating a new component type on each render while keeping signalMeta
-    // in scope via the useMemo closure — Recharts calls it as a render function.
-    const tooltipRenderer = useMemo(() => makeSensorTooltip(signalMeta), [signalMeta]);
-
-    return (
-        <div>
-            <ResponsiveContainer width="100%" height={height} minWidth={0}>
-                <ComposedChart
-                    data={chartData}
-                    margin={{ top: 5, right: 20, bottom: 0, left: 0 }}
-                >
-                    <ChartDefs />
-                    <CartesianGrid strokeDasharray="2 4" stroke="#98A6D4" strokeOpacity={0.3} />
-                    <XAxis
-                        dataKey="timestamp"
-                        type="number"
-                        scale="time"
-                        domain={xDomain}
-                        ticks={ticks}
-                        tickFormatter={(v) => formatTimestamp(v, granularity)}
-                        tick={{ fontSize: 9, fill: '#FFFFFF' }}
-                        axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
-                        tickLine={false}
-                    />
-                    <YAxis
-                        tick={{ fontSize: 9, fill: '#FFFFFF' }}
-                        axisLine={false}
-                        tickLine={false}
-                        domain={[0, 100]}
-                        width={COMMON_Y_AXIS_WIDTH}
-                        tickFormatter={(v: number) => `${v}%`}
-                    />
-                    <Tooltip content={tooltipRenderer} wrapperStyle={{ zIndex: 50 }} />
-
-                    {visibleSensors.pressure    && <Area isAnimationActive={false} type="monotone" dataKey="pressure"    stroke="#A9FFB5" strokeWidth={2} fill="url(#gradient-pressure)"    dot={false} />}
-                    {visibleSensors.temperature && <Area isAnimationActive={false} type="monotone" dataKey="temperature" stroke="#FFCEBD" strokeWidth={2} fill="url(#gradient-temperature)" dot={false} />}
-                    {visibleSensors.vibration   && <Area isAnimationActive={false} type="monotone" dataKey="vibration"   stroke="#F7E2FF" strokeWidth={2} fill="url(#gradient-vibration)"   dot={false} />}
-                    {visibleSensors.humidity    && <Area isAnimationActive={false} type="monotone" dataKey="humidity"    stroke="#7BC3FF" strokeWidth={2} fill="url(#gradient-humidity)"    dot={false} />}
-
-                    {/* Anomaly markers — only appear when triggerAnomaly() is called */}
-                    <Scatter
-                        dataKey="anomaly_y"
-                        isAnimationActive={false}
-                        shape={(props: any) => {
-                            if (props.payload.anomaly_y === null) return <g />;
-                            return (
-                                <circle
-                                    cx={props.cx} cy={props.cy} r={7}
-                                    fill={props.payload.alertLevel === 'critical' ? '#ef4444' : '#f59e0b'}
-                                    stroke="#18181b" strokeWidth={2}
-                                />
-                            );
-                        }}
-                    />
-                </ComposedChart>
-            </ResponsiveContainer>
-            {visibleSensors.camera && <VideoFrameStrip data={data} />}
-        </div>
-    );
-});
-
-const EnergyLayer = memo(function EnergyLayer({
-    data,
-    xDomain,
-    granularity,
-    expanded,
-}: {
-    data: EnergyReading[];
-    xDomain: [number, number];
-    granularity: TimeGranularity;
-    expanded: boolean;
-}) {
-    const height = expanded ? 300 : 100;
-
-    const yDomain = useMemo((): [number, number] => {
-        if (data.length === 0) return [0, 200];
-        const max = Math.max(...data.map((d) => d.powerDraw));
-        return [0, Math.ceil(max * 1.2)];
-    }, [data]);
-
-    const ticks = useMemo(() => xTicks(xDomain), [xDomain]);
-
     return (
         <ResponsiveContainer width="100%" height={height} minWidth={0}>
             <ComposedChart data={data} margin={{ top: 5, right: 20, bottom: 0, left: 0 }}>
@@ -499,44 +417,104 @@ const EnergyLayer = memo(function EnergyLayer({
                     tickLine={false}
                     width={COMMON_Y_AXIS_WIDTH}
                     domain={yDomain}
+                    tickFormatter={yTickFormatter}
                 />
-                <Tooltip content={<EnergyTooltip />} wrapperStyle={{ zIndex: 50 }} />
-                <Area
-                    isAnimationActive={false}
-                    type="monotone"
-                    dataKey="powerDraw"
-                    stroke="#fbbf24"
-                    strokeWidth={2}
-                    fill="url(#gradient-power)"
-                    dot={false}
-                    activeDot={{ r: 4, fill: '#fbbf24', stroke: '#fff', strokeWidth: 2 }}
-                />
-                {expanded && (
-                    <Area
-                        isAnimationActive={false}
-                        type="monotone"
-                        dataKey="coolingLoad"
-                        stroke="#fb923c"
-                        strokeWidth={2}
-                        strokeDasharray="3 3"
-                        fill="url(#gradient-cooling)"
-                        dot={false}
-                    />
-                )}
-                {expanded && (
-                    <Line
-                        isAnimationActive={false}
-                        type="monotone"
-                        dataKey="efficiency"
-                        stroke="#4ade80"
-                        strokeWidth={1}
-                        dot={false}
-                        strokeDasharray="2 2"
-                        yAxisId={0}
-                    />
-                )}
+                {children}
             </ComposedChart>
         </ResponsiveContainer>
+    );
+});
+
+// ─── SENSOR LAYER ────────────────────────────────────────────────────────────
+// Multiple Area series (one per channel) + anomaly Scatter markers.
+// Overrides: fixed 0–100 Y-axis (normalized values), optional camera strip.
+
+const SensorLayer = memo(function SensorLayer({
+    data,
+    xDomain,
+    granularity,
+    expanded,
+    visibleSensors,
+    signalMeta,
+}: {
+    data: SensorReading[];
+    xDomain: [number, number];
+    granularity: TimeGranularity;
+    expanded: boolean;
+    visibleSensors: Record<string, boolean>;
+    signalMeta: SignalMeta[];
+}) {
+    const height = expanded ? 300 : 100;
+    const chartData = useMemo(() => data.map((s) => ({
+        ...s,
+        anomaly_y: s.anomaly ? s.vibration : null,
+    })), [data]);
+    const tooltipRenderer = useMemo(() => makeSensorTooltip(signalMeta), [signalMeta]);
+
+    return (
+        <div>
+            <TimelineChartBase
+                data={chartData}
+                xDomain={xDomain}
+                granularity={granularity}
+                height={height}
+                yDomain={[0, 100]}
+                yTickFormatter={(v) => `${v}%`}
+            >
+                <Tooltip content={tooltipRenderer} wrapperStyle={{ zIndex: 50 }} />
+                {visibleSensors.pressure    && <Area isAnimationActive={false} type="monotone" dataKey="pressure"    stroke="#A9FFB5" strokeWidth={2} fill="url(#gradient-pressure)"    dot={false} />}
+                {visibleSensors.temperature && <Area isAnimationActive={false} type="monotone" dataKey="temperature" stroke="#FFCEBD" strokeWidth={2} fill="url(#gradient-temperature)" dot={false} />}
+                {visibleSensors.vibration   && <Area isAnimationActive={false} type="monotone" dataKey="vibration"   stroke="#F7E2FF" strokeWidth={2} fill="url(#gradient-vibration)"   dot={false} />}
+                {visibleSensors.humidity    && <Area isAnimationActive={false} type="monotone" dataKey="humidity"    stroke="#7BC3FF" strokeWidth={2} fill="url(#gradient-humidity)"    dot={false} />}
+                <Scatter
+                    dataKey="anomaly_y"
+                    isAnimationActive={false}
+                    shape={(props: any) => {
+                        if (props.payload.anomaly_y === null) return <g />;
+                        return (
+                            <circle
+                                cx={props.cx} cy={props.cy} r={7}
+                                fill={props.payload.alertLevel === 'critical' ? '#ef4444' : '#f59e0b'}
+                                stroke="#18181b" strokeWidth={2}
+                            />
+                        );
+                    }}
+                />
+            </TimelineChartBase>
+            {visibleSensors.camera && <VideoFrameStrip data={data} />}
+        </div>
+    );
+});
+
+// ─── ENERGY LAYER ────────────────────────────────────────────────────────────
+// Power draw Area + optional cooling/efficiency in expanded mode.
+// Overrides: dynamic Y-axis capped at 1.2× max powerDraw.
+
+const EnergyLayer = memo(function EnergyLayer({
+    data,
+    xDomain,
+    granularity,
+    expanded,
+}: {
+    data: EnergyReading[];
+    xDomain: [number, number];
+    granularity: TimeGranularity;
+    expanded: boolean;
+}) {
+    const height = expanded ? 300 : 100;
+    const yDomain = useMemo((): [number, number] => {
+        if (data.length === 0) return [0, 200];
+        const max = Math.max(...data.map((d) => d.powerDraw));
+        return [0, Math.ceil(max * 1.2)];
+    }, [data]);
+
+    return (
+        <TimelineChartBase data={data} xDomain={xDomain} granularity={granularity} height={height} yDomain={yDomain}>
+            <Tooltip content={<EnergyTooltip />} wrapperStyle={{ zIndex: 50 }} />
+            <Area isAnimationActive={false} type="monotone" dataKey="powerDraw" stroke="#fbbf24" strokeWidth={2} fill="url(#gradient-power)" dot={false} activeDot={{ r: 4, fill: '#fbbf24', stroke: '#fff', strokeWidth: 2 }} />
+            {expanded && <Area isAnimationActive={false} type="monotone" dataKey="coolingLoad" stroke="#fb923c" strokeWidth={2} strokeDasharray="3 3" fill="url(#gradient-cooling)" dot={false} />}
+            {expanded && <Line isAnimationActive={false} type="monotone" dataKey="efficiency" stroke="#4ade80" strokeWidth={1} dot={false} strokeDasharray="2 2" yAxisId={0} />}
+        </TimelineChartBase>
     );
 });
 
@@ -623,6 +601,10 @@ const ActionsLayer = memo(function ActionsLayer({
     );
 });
 
+// ─── PRODUCT LAYER ───────────────────────────────────────────────────────────
+// Output vs target Area + optional uptime line on a right Y-axis.
+// Overrides: dynamic Y-axis scaled to data range, K/M tick formatter.
+
 const ProductLayer = memo(function ProductLayer({
     data,
     xDomain,
@@ -635,61 +617,24 @@ const ProductLayer = memo(function ProductLayer({
     expanded: boolean;
 }) {
     const height = expanded ? 300 : 100;
-
     const yDomain = useMemo((): [number, number] => {
         if (data.length === 0) return [700, 1300];
         const vals = data.flatMap((d) => [d.output, d.target]);
         return [Math.min(...vals) * 0.95, Math.max(...vals) * 1.05];
     }, [data]);
 
-    const ticks = useMemo(() => xTicks(xDomain), [xDomain]);
-
     return (
-        <ResponsiveContainer width="100%" height={height} minWidth={0}>
-            <ComposedChart data={data} margin={{ top: 5, right: 20, bottom: 0, left: 0 }}>
-                <ChartDefs />
-                <CartesianGrid strokeDasharray="2 4" stroke="#98A6D4" strokeOpacity={0.3} />
-                <XAxis
-                    dataKey="timestamp"
-                    type="number"
-                    scale="time"
-                    domain={xDomain}
-                    ticks={ticks}
-                    tickFormatter={(v) => formatTimestamp(v, granularity)}
-                    tick={{ fontSize: 9, fill: '#FFFFFF' }}
-                    axisLine={{ stroke: '#98A6D4', strokeOpacity: 0.3 }}
-                    tickLine={false}
-                />
-                <YAxis
-                    tick={{ fontSize: 9, fill: '#FFFFFF' }}
-                    axisLine={false}
-                    tickLine={false}
-                    width={COMMON_Y_AXIS_WIDTH}
-                    domain={yDomain}
-                    tickFormatter={formatNumber}
-                />
-                <Tooltip content={<ProductTooltip />} wrapperStyle={{ zIndex: 50 }} />
-                {/* Target — dashed reference line */}
-                <Area isAnimationActive={false} type="monotone" dataKey="target" fill="#a78bfa10" stroke="#a78bfa" strokeWidth={1} strokeDasharray="4 4" dot={false} />
-                {/* Output — main line */}
-                <Area
-                    isAnimationActive={false}
-                    type="monotone"
-                    dataKey="output"
-                    stroke="#a78bfa"
-                    strokeWidth={2}
-                    fill="url(#gradient-product)"
-                    dot={false}
-                    activeDot={{ r: 4, fill: '#a78bfa', stroke: '#fff', strokeWidth: 2 }}
-                />
-                {expanded && (
-                    <>
-                        <YAxis yAxisId={1} orientation="right" tick={{ fontSize: 9, fill: '#FFFFFF' }} axisLine={false} tickLine={false} width={35} tickFormatter={(v: number) => `${v}%`} />
-                        <Line isAnimationActive={false} type="monotone" dataKey="uptime" stroke="#4ade80" strokeWidth={1} dot={false} strokeDasharray="2 2" yAxisId={1} />
-                    </>
-                )}
-            </ComposedChart>
-        </ResponsiveContainer>
+        <TimelineChartBase data={data} xDomain={xDomain} granularity={granularity} height={height} yDomain={yDomain} yTickFormatter={formatNumber}>
+            <Tooltip content={<ProductTooltip />} wrapperStyle={{ zIndex: 50 }} />
+            <Area isAnimationActive={false} type="monotone" dataKey="target" fill="#a78bfa10" stroke="#a78bfa" strokeWidth={1} strokeDasharray="4 4" dot={false} />
+            <Area isAnimationActive={false} type="monotone" dataKey="output" stroke="#a78bfa" strokeWidth={2} fill="url(#gradient-product)" dot={false} activeDot={{ r: 4, fill: '#a78bfa', stroke: '#fff', strokeWidth: 2 }} />
+            {expanded && (
+                <>
+                    <YAxis yAxisId={1} orientation="right" tick={{ fontSize: 9, fill: '#FFFFFF' }} axisLine={false} tickLine={false} width={35} tickFormatter={(v: number) => `${v}%`} />
+                    <Line isAnimationActive={false} type="monotone" dataKey="uptime" stroke="#4ade80" strokeWidth={1} dot={false} strokeDasharray="2 2" yAxisId={1} />
+                </>
+            )}
+        </TimelineChartBase>
     );
 });
 
@@ -1223,8 +1168,7 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
                                 nodeMappings={nodeMappings}
                             />
                             <div className="px-2">
-                                {/* SensorLayerLW: canvas-based, O(1) streaming updates — no SVG reconciliation */}
-                                <SensorLayerLW
+                                <SensorLayer
                                     data={sensorData}
                                     xDomain={xDomain}
                                     granularity={granularity}
