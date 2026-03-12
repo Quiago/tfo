@@ -516,6 +516,15 @@ export function useConnectorTimeline(
                     const kept = pruneBuffer(seeded, cutoff);
                     setSensorBuffer(kept);
                     bufferRef.current = kept;
+
+                    // Seed energy buffer from the same history so the Energy chart
+                    // is populated immediately. When real OPC UA energy readings
+                    // arrive they append on top — the derived seed just fills the
+                    // left portion until live data takes over.
+                    const seededEnergy = kept.map(deriveEnergy);
+                    setEnergyBuffer(seededEnergy);
+                    energyBufferRef.current = seededEnergy;
+
                     console.log('[Connector] Seeded buffer:', kept.length, 'readings from last', seedMinutes, 'min');
                 }
             } catch (err) {
