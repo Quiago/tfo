@@ -37,16 +37,16 @@ export interface LocalMessage {
     thinking?: string
     created_at: string
     streaming?: boolean
-    /** Agent mode: plan steps shown before the answer */
+    /** Plan steps shown before the answer */
     agent_plan?: string[]
-    /** Agent mode: UI actions returned in the final step */
-    agent_ui_actions?: import('@/lib/services/agent.service').UIAction[]
+    /** UI actions to render as interactive cards */
+    agent_ui_actions?: Array<{ type: string; payload: Record<string, unknown> }>
 }
 
 // ─── SSE EVENTS ───────────────────────────────────────────────────────────────
 
 export interface StreamEvent {
-    type: 'token' | 'tool_call' | 'tool_result' | 'thinking' | 'done' | 'error'
+    type: 'token' | 'tool_call' | 'tool_result' | 'thinking' | 'done' | 'error' | 'ui_action'
     content?: string
     name?: string
     arguments?: Record<string, unknown>
@@ -54,6 +54,8 @@ export interface StreamEvent {
     message_id?: string
     conversation_id?: string
     error?: string
+    ui_action?: { type: string; payload: Record<string, unknown> }
+    ui_actions?: Array<{ type: string; payload: Record<string, unknown> }>
 }
 
 // ─── LLM CATALOG ─────────────────────────────────────────────────────────────

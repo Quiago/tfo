@@ -168,9 +168,13 @@ def build_context(
         ctx_block = "\n".join(lines)
         system_parts.append(
             "\n## SCREEN CONTEXT — what the user is currently viewing\n"
-            f"{ctx_block}\n"
-            "When the user refers to 'the selected range', 'this period', or 'what I highlighted' → "
-            "use the selected range timestamps above with query_time_range or get_sensor_statistics."
+            f"{ctx_block}\n\n"
+            "FAST-PATH RULES (skip data tools, answer directly or use get_screen_context):\n"
+            "• 'What am I seeing/viewing/looking at?' / 'where am I?' → call get_screen_context() or answer from this block.\n"
+            "  Do NOT call list_assets or sensor tools for these questions.\n"
+            "• 'The selected range' / 'this period' / 'what I highlighted' → call analyze_selected_range().\n"
+            "• 'This machine' / 'current asset' / 'what I'm looking at' → call analyze_focused_asset().\n"
+            "• To highlight a range or navigate the UI → call trigger_ui_action()."
         )
 
     if memories:

@@ -180,6 +180,7 @@ async def send_message_streaming(conversation_id: str, user_id: int, content: st
     tools = OPENAI_TOOL_SCHEMAS if model_config.supports_native_tools else None
 
     tool_calls_log: list[dict] = []
+    ui_actions_log: list[dict] = []
     final_text = ""
 
     for iteration in range(_MAX_TOOL_ITERATIONS):
@@ -202,11 +203,21 @@ async def send_message_streaming(conversation_id: str, user_id: int, content: st
         logger.info("stream_tool_call — conv=%s tool=%s args=%s", conversation_id, tool_name, tool_args)
 
         try:
-            tool_result = await execute_tool(tool_name, tool_args, session)
+            tool_result = await execute_tool(tool_name, tool_args, session, screen_context=screen_context)
         except Exception as exc:
             logger.error("stream_tool_error — conv=%s tool=%s", conversation_id, tool_name, exc_info=True)
             tool_result = f"Tool error: {exc}"
         tool_calls_log.append({"name": tool_name, "arguments": tool_args, "result": tool_result})
+
+        # Detect UI action marker and emit as a separate SSE event before the result preview
+        try:
+            result_data = json.loads(tool_result)
+            if result_data.get("__ui_action__"):
+                action = {"type": result_data["type"], "payload": result_data.get("payload", {})}
+                ui_actions_log.append(action)
+                yield {"type": "ui_action", "ui_action": action}
+        except Exception:
+            pass
 
         yield {
             "type": "tool_result",
@@ -239,7 +250,7 @@ async def send_message_streaming(conversation_id: str, user_id: int, content: st
     _touch_conversation(conv, session)
 
     logger.info("stream_done — conv=%s msg=%s", conversation_id, assistant_msg.id)
-    yield {"type": "done", "message_id": assistant_msg.id, "conversation_id": conv.id}
+    yield {"type": "done", "message_id": assistant_msg.id, "conversation_id": conv.id, "ui_actions": ui_actions_log}
 
 
 def list_memories(user_id: int, session: Session) -> list[MemoryEntry]:

@@ -5,14 +5,14 @@ import {
     deleteMemory, getMessages, listConversations,
     listMemories, streamMessage,
 } from '@/lib/services/chat.service'
-import { runAgent, serialiseScreenContext, type UIAction } from '@/lib/services/agent.service'
+import { serialiseScreenContext, type UIAction } from '@/lib/services/agent.service'
 import { useScreenContext } from '@/lib/store/screen-context-store'
 import { deleteDocument, listDocuments, uploadDocument } from '@/lib/services/knowledge-base.service'
 import { getModelCatalog, loadModel } from '@/lib/services/llm.service'
 import type { Conversation, KBDocument, LocalMessage, MemoryEntry, ModelCatalog, ToolCallEntry } from '@/lib/types/chat'
 import type { LucideIcon } from 'lucide-react'
 import {
-    AlertCircle, ArrowUp, BookOpen, Bot, Brain, ChevronDown,
+    AlertCircle, ArrowUp, BookOpen, Brain, ChevronDown,
     FileText, Loader2, MessageSquare, Monitor, Paperclip, Plus,
     Sparkles, Trash2, Upload, Wrench, X,
 } from 'lucide-react'
@@ -179,35 +179,28 @@ interface ContextSuggestion {
 
 /**
  * Derives 2-4 contextual quick-action suggestions from the live screen state.
- * No hardcoded copy — everything is derived from what the user is currently viewing.
+ * Always context-aware — no hardcoded copy.
  */
 function getContextSuggestions(
     activeModule: string,
     assetName: string | null,
     hasRange: boolean,
-    agentMode: boolean,
 ): ContextSuggestion[] {
     const out: ContextSuggestion[] = []
 
-    if (agentMode) {
-        if (assetName) {
-            out.push({ label: `Analyze ${assetName}`, prompt: `Analyze the current status of ${assetName} and flag any anomalies.`, Icon: Sparkles })
-            out.push({ label: `Recent alerts for ${assetName}`, prompt: `Are there any anomalies or out-of-range readings for ${assetName} in the last 30 minutes?`, Icon: AlertCircle })
-        } else {
-            out.push({ label: 'What am I looking at?', prompt: 'What am I currently looking at on the dashboard?', Icon: Monitor })
-        }
-        if (hasRange) {
-            out.push({ label: 'Analyze selected range', prompt: 'Analyze the time range I selected on the timeline and summarize what happened.', Icon: Wrench })
-        }
-        out.push({ label: `Summarize ${activeModule}`, prompt: `Give me a concise summary of the ${activeModule} view and the most important things to know right now.`, Icon: BookOpen })
+    if (assetName) {
+        out.push({ label: `Analyze ${assetName}`, prompt: `Analyze the current status of ${assetName} and flag any anomalies.`, Icon: Sparkles })
+        out.push({ label: `Recent alerts for ${assetName}`, prompt: `Are there any anomalies or out-of-range readings for ${assetName} in the last 30 minutes?`, Icon: AlertCircle })
+    } else {
+        out.push({ label: 'What am I looking at?', prompt: 'What am I currently looking at on the dashboard?', Icon: Monitor })
+        out.push({ label: 'Asset overview', prompt: 'List all assets and their current operational status.', Icon: Sparkles })
+    }
+    if (hasRange) {
+        out.push({ label: 'Analyze selected range', prompt: 'Analyze the time range I selected on the timeline and summarize what happened.', Icon: Wrench })
     } else {
         out.push({ label: 'Sensor statistics', prompt: 'Show me the latest sensor statistics across all assets.', Icon: Wrench })
-        if (assetName) {
-            out.push({ label: `Ask about ${assetName}`, prompt: `Tell me about ${assetName} and its recent performance.`, Icon: MessageSquare })
-        }
-        out.push({ label: 'Asset overview', prompt: 'List all assets and their current operational status.', Icon: Sparkles })
-        out.push({ label: 'Knowledge base', prompt: 'What documents do you have in the knowledge base that are relevant to my current equipment?', Icon: BookOpen })
     }
+    out.push({ label: `Summarize ${activeModule}`, prompt: `Give me a summary of the ${activeModule} view and the most important things to know right now.`, Icon: BookOpen })
 
     return out.slice(0, 4)
 }
@@ -261,8 +254,7 @@ export function AiChatBubble() {
     const [noModelLoaded, setNoModelLoaded] = useState(false)
     const pendingRetryRef = useRef<string | null>(null)
 
-    // Agent mode
-    const [agentMode, setAgentMode] = useState(false)
+    // Screen context (always active — unified mode)
     const screenCtx = useScreenContext()
 
     // ── Auto-scroll ────────────────────────────────────────────────────────
@@ -393,89 +385,7 @@ export function AiChatBubble() {
         abortRef.current = abort
 
         try {
-            // ── Agent mode ────────────────────────────────────────────────────
-            if (agentMode) {
-                const agentRequest = {
-                    prompt: content,
-                    screen_context: serialiseScreenContext(screenCtx),
-                }
-                for await (const event of runAgent(agentRequest, abort.signal)) {
-                    if (abort.signal.aborted) break
-                    switch (event.type) {
-                        case 'plan':
-                            setMessages(prev => prev.map(m =>
-                                m.id === streamingIdRef.current
-                                    ? { ...m, agent_plan: event.plan }
-                                    : m
-                            ))
-                            break
-                        case 'token':
-                            setMessages(prev => prev.map(m =>
-                                m.id === streamingIdRef.current
-                                    ? { ...m, content: m.content + (event.content ?? '') }
-                                    : m
-                            ))
-                            break
-                        case 'thinking':
-                            setMessages(prev => prev.map(m =>
-                                m.id === streamingIdRef.current
-                                    ? { ...m, thinking: event.content ?? '' }
-                                    : m
-                            ))
-                            break
-                        case 'tool_call':
-                            setMessages(prev => prev.map(m => {
-                                if (m.id !== streamingIdRef.current) return m
-                                const entry: ToolCallEntry = {
-                                    name: event.tool_name ?? 'unknown',
-                                    arguments: event.tool_args,
-                                }
-                                return { ...m, tool_calls: [...(m.tool_calls ?? []), entry] }
-                            }))
-                            break
-                        case 'tool_result':
-                            setMessages(prev => prev.map(m => {
-                                if (m.id !== streamingIdRef.current) return m
-                                const calls = [...(m.tool_calls ?? [])]
-                                const idx = calls.findLastIndex(tc => tc.result === undefined)
-                                if (idx >= 0) {
-                                    calls[idx] = { ...calls[idx], result: event.tool_result_preview ?? '' }
-                                }
-                                return { ...m, tool_calls: calls }
-                            }))
-                            break
-                        case 'ui_action':
-                            // Execute immediately: highlight_range writes to screen context
-                            if (event.ui_action?.type === 'highlight_range') {
-                                const { start, end } = event.ui_action.payload as { start: number; end: number }
-                                if (start && end) screenCtx.setDateRange({ start, end })
-                            }
-                            break
-                        case 'done':
-                            setMessages(prev => prev.map(m =>
-                                m.id === streamingIdRef.current
-                                    ? { ...m, streaming: false, agent_ui_actions: event.ui_actions ?? [] }
-                                    : m
-                            ))
-                            break
-                        case 'error': {
-                            const errMsg = event.error ?? 'Agent error'
-                            if (errMsg.toLowerCase().includes('no model loaded')) {
-                                handleModelNotReady(content)
-                            } else {
-                                setError(errMsg)
-                            }
-                            break
-                        }
-                    }
-                }
-                setMessages(prev => prev.map(m =>
-                    m.id === streamingIdRef.current ? { ...m, streaming: false } : m
-                ))
-                return
-            }
-
-            // ── Chat mode ─────────────────────────────────────────────────────
+            // ── Unified chat stream (screen context always included) ───────────
             let finalMessageId: string | null = null
 
             for await (const event of streamMessage(convId, content, { screen_context: serialiseScreenContext(screenCtx) }, abort.signal)) {
@@ -521,8 +431,32 @@ export function AiChatBubble() {
                         }))
                         break
 
+                    case 'ui_action': {
+                        // Execute side-effects immediately
+                        const action = event.ui_action
+                        if (action?.type === 'highlight_range') {
+                            const { start, end } = action.payload as { start: number; end: number }
+                            if (start && end) screenCtx.setDateRange({ start, end })
+                        }
+                        // Accumulate for display cards on the message
+                        setMessages(prev => prev.map(m =>
+                            m.id === streamingIdRef.current
+                                ? { ...m, agent_ui_actions: [...(m.agent_ui_actions ?? []), action!] }
+                                : m
+                        ))
+                        break
+                    }
+
                     case 'done':
                         finalMessageId = event.message_id ?? null
+                        // Merge any ui_actions from the done event too
+                        if (event.ui_actions?.length) {
+                            setMessages(prev => prev.map(m =>
+                                m.id === streamingIdRef.current
+                                    ? { ...m, agent_ui_actions: event.ui_actions }
+                                    : m
+                            ))
+                        }
                         break
 
                     case 'error': {
@@ -558,7 +492,7 @@ export function AiChatBubble() {
             setStreaming(false)
             abortRef.current = null
         }
-    }, [input, streaming, activeConvId, currentModelId, catalog?.default_model, agentMode, screenCtx, handleModelNotReady])
+    }, [input, streaming, activeConvId, currentModelId, catalog?.default_model, screenCtx, handleModelNotReady])
 
     // ── Auto-retry: poll catalog until model ready, then resend ───────────────
     useEffect(() => {
@@ -878,26 +812,9 @@ export function AiChatBubble() {
                                 <Plus size={14} />
                             </button>
 
-                            {/* Agent mode toggle */}
-                            <button
-                                onClick={() => setAgentMode(v => !v)}
-                                title={agentMode ? 'Switch to Chat mode' : 'Switch to Agent mode — AI acts autonomously using screen context'}
-                                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors flex-shrink-0 border ${
-                                    agentMode
-                                        ? 'bg-violet-100 border-violet-300 text-violet-700'
-                                        : 'bg-transparent border-transparent text-[#98A6D4] hover:bg-[#F2F5FF] hover:text-[#3A3A3A]'
-                                }`}
-                            >
-                                <Bot size={11} />
-                                <span className="hidden sm:inline">{agentMode ? 'Agent' : 'Chat'}</span>
-                            </button>
-
                             {/* Title */}
                             <span className="text-sm font-bold text-[#3A3A3A] flex-1 truncate min-w-0">
-                                {agentMode
-                                    ? (screenCtx.selectedTeamName ? `Agent · ${screenCtx.selectedTeamName}` : 'Agent mode')
-                                    : (activeConv?.title ?? 'New conversation')
-                                }
+                                {activeConv?.title ?? 'New conversation'}
                             </span>
 
                             {/* Close */}
@@ -919,24 +836,18 @@ export function AiChatBubble() {
                                 <div className="flex flex-col justify-center h-full gap-4 px-4 py-6">
                                     {/* Header */}
                                     <div className="flex flex-col items-center gap-2 text-center">
-                                        <div className={`h-9 w-9 rounded-full flex items-center justify-center ${agentMode ? 'bg-violet-500/10' : 'bg-cyan-500/10'}`}>
-                                            {agentMode
-                                                ? <Bot size={18} className="text-violet-500" />
-                                                : <Sparkles size={18} className="text-cyan-500" />
-                                            }
+                                        <div className="h-9 w-9 rounded-full flex items-center justify-center bg-cyan-500/10">
+                                            <Sparkles size={18} className="text-cyan-500" />
                                         </div>
-                                        <p className="text-sm font-semibold text-[#3A3A3A]">
-                                            {agentMode ? 'How can I help you today?' : 'Ask OpsFlow AI'}
-                                        </p>
+                                        <p className="text-sm font-semibold text-[#3A3A3A]">How can I help you today?</p>
                                     </div>
 
-                                    {/* Suggestion pills — derived from screen context, not hardcoded */}
+                                    {/* Suggestion pills — derived from screen context */}
                                     <div className="flex flex-col gap-1.5">
                                         {getContextSuggestions(
                                             screenCtx.activeModule,
                                             screenCtx.selectedTeamName,
                                             !!(screenCtx.dateRange),
-                                            agentMode,
                                         ).map((s, i) => (
                                             <button
                                                 key={i}
@@ -964,7 +875,7 @@ export function AiChatBubble() {
                                         {msg.agent_plan && msg.agent_plan.length > 0 && (
                                             <div className="my-1 rounded-xl border border-violet-100 bg-violet-50/60 text-xs overflow-hidden w-full">
                                                 <div className="flex items-center gap-2 px-3 py-2 border-b border-violet-100">
-                                                    <Bot size={11} className="text-violet-500 flex-shrink-0" />
+                                                    <Sparkles size={11} className="text-violet-500 flex-shrink-0" />
                                                     <span className="font-semibold text-violet-600">Plan</span>
                                                 </div>
                                                 <ol className="px-3 py-2 space-y-1 list-decimal list-inside">
@@ -1091,7 +1002,7 @@ export function AiChatBubble() {
                                     value={input}
                                     onChange={e => setInput(e.target.value)}
                                     onKeyDown={handleKeyDown}
-                                    placeholder={streaming ? 'Thinking...' : agentMode ? 'Ask anything — agent sees your screen...' : 'Ask OpsFlow AI...'}
+                                    placeholder={streaming ? 'Thinking...' : 'Ask anything — AI sees your screen...'}
                                     disabled={streaming}
                                     rows={1}
                                     className="bg-transparent border-none outline-none text-sm text-[#3A3A3A] placeholder:text-zinc-400 resize-none min-h-[24px] max-h-[80px] py-0.5 disabled:opacity-50 w-full"
