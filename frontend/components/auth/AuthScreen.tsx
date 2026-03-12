@@ -3,20 +3,29 @@
 import { useAuthStore } from '@/lib/store/auth-store';
 import { login, register } from '@/lib/services/auth.service';
 import { ApiError } from '@/lib/services/backend';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 type Mode = 'login' | 'register';
 
-const ERROR_MESSAGES: Record<number, string> = {
+type ServerStatus =
+  | { phase: 'waking' }
+  | { phase: 'ready' }
+  | { phase: 'error'; message: string };
+
+// ── Error message map ─────────────────────────────────────────────────────────
+
+const AUTH_ERROR_MESSAGES: Record<number, string> = {
   401: 'Invalid email or password.',
   409: 'An account with this email already exists.',
   422: 'Please enter a valid email address.',
   503: 'Cannot reach the server. Make sure the backend is running.',
 };
 
-function getErrorMessage(err: unknown): string {
+function getAuthErrorMessage(err: unknown): string {
   if (err instanceof ApiError) {
-    return ERROR_MESSAGES[err.status] ?? `Server error (${err.status}). Please try again.`;
+    return AUTH_ERROR_MESSAGES[err.status] ?? `Server error (${err.status}). Please try again.`;
   }
   if (err instanceof TypeError) {
     return 'Cannot reach the server. Make sure the backend is running on port 8000.';
@@ -24,13 +33,93 @@ function getErrorMessage(err: unknown): string {
   return 'Something went wrong. Please try again.';
 }
 
+// ── Server status indicator ───────────────────────────────────────────────────
+
+function ServerStatusBadge({ status, onRetry }: { status: ServerStatus; onRetry: () => void }) {
+  if (status.phase === 'ready') {
+    return (
+      <div className="flex items-center gap-1.5 text-xs text-emerald-400 mb-4">
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0" />
+        Server ready
+      </div>
+    );
+  }
+
+  if (status.phase === 'error') {
+    return (
+      <div className="flex items-center gap-2 mb-4">
+        <span className="h-1.5 w-1.5 rounded-full bg-red-400 shrink-0" />
+        <span className="text-xs text-red-400">{status.message}</span>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="text-xs text-cyan-500 hover:text-cyan-400 underline ml-auto shrink-0 transition-colors"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  // waking
+  return (
+    <div className="flex items-center gap-1.5 text-xs text-zinc-400 mb-4">
+      <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
+      Connecting to factory server…
+    </div>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
 export function AuthScreen() {
   const setAuth = useAuthStore((s) => s.setAuth);
-  const [mode, setMode] = useState<Mode>('login');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+
+  const [mode, setMode]           = useState<Mode>('login');
+  const [email, setEmail]         = useState('');
+  const [password, setPassword]   = useState('');
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState<string | null>(null);
+  const [serverStatus, setServerStatus] = useState<ServerStatus>({ phase: 'waking' });
+
+  const wakeAbortRef = useRef<AbortController | null>(null);
+
+  // ── Wake-up flow ───────────────────────────────────────────────────────────
+
+  const wakeServer = () => {
+    // Cancel any in-flight wake request
+    wakeAbortRef.current?.abort();
+    const controller = new AbortController();
+    wakeAbortRef.current = controller;
+
+    setServerStatus({ phase: 'waking' });
+
+    fetch('/api/wake', { method: 'POST', signal: controller.signal })
+      .then((res) => res.json())
+      .then((body: { ready: boolean; error?: string }) => {
+        if (body.ready) {
+          setServerStatus({ phase: 'ready' });
+        } else {
+          setServerStatus({
+            phase: 'error',
+            message: 'Server unavailable — retry?',
+          });
+        }
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        setServerStatus({ phase: 'error', message: 'Server unavailable — retry?' });
+      });
+  };
+
+  // Start wake-up on mount; clean up on unmount
+  useEffect(() => {
+    wakeServer();
+    return () => { wakeAbortRef.current?.abort(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Auth submit ────────────────────────────────────────────────────────────
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -44,11 +133,19 @@ export function AuthScreen() {
       const { access_token } = await login(email, password);
       setAuth(access_token, email);
     } catch (err) {
-      setError(getErrorMessage(err));
+      setError(getAuthErrorMessage(err));
     } finally {
       setLoading(false);
     }
   }
+
+  const isServerReady  = serverStatus.phase === 'ready';
+  const submitDisabled = loading || !isServerReady;
+  const submitLabel    = (() => {
+    if (loading) return mode === 'register' ? 'Creating account…' : 'Signing in…';
+    if (!isServerReady) return 'Waiting for server…';
+    return mode === 'login' ? 'Sign In' : 'Create Account';
+  })();
 
   return (
     <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
@@ -83,6 +180,9 @@ export function AuthScreen() {
             </div>
             <p className="text-zinc-500 text-sm">Industrial Intelligence Platform</p>
           </div>
+
+          {/* Server status */}
+          <ServerStatusBadge status={serverStatus} onRetry={wakeServer} />
 
           {/* Mode toggle */}
           <div className="flex bg-zinc-800 rounded-lg p-1 mb-6">
@@ -133,7 +233,7 @@ export function AuthScreen() {
               />
             </div>
 
-            {/* Error */}
+            {/* Auth error */}
             {error && (
               <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2.5">
                 <svg className="w-4 h-4 text-red-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -146,17 +246,13 @@ export function AuthScreen() {
             {/* Submit */}
             <button
               type="submit"
-              disabled={loading}
-              className="w-full mt-2 bg-cyan-500 hover:bg-cyan-400 disabled:bg-zinc-700 disabled:text-zinc-500 text-zinc-950 font-semibold py-2.5 rounded-lg text-sm transition-colors flex items-center justify-center gap-2"
+              disabled={submitDisabled}
+              className="w-full mt-2 bg-cyan-500 hover:bg-cyan-400 disabled:bg-zinc-700 disabled:text-zinc-500 disabled:cursor-not-allowed text-zinc-950 font-semibold py-2.5 rounded-lg text-sm transition-colors flex items-center justify-center gap-2"
             >
-              {loading ? (
-                <>
-                  <span className="h-4 w-4 rounded-full border-2 border-zinc-500 border-t-zinc-300 animate-spin" />
-                  {mode === 'register' ? 'Creating account…' : 'Signing in…'}
-                </>
-              ) : (
-                mode === 'login' ? 'Sign In' : 'Create Account'
+              {loading && (
+                <span className="h-4 w-4 rounded-full border-2 border-zinc-500 border-t-zinc-300 animate-spin" />
               )}
+              {submitLabel}
             </button>
           </form>
 
