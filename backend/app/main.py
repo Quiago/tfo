@@ -23,7 +23,7 @@ from sqlmodel import Session, Session as SQLModelSession
 from app.api.v1.router import api_router
 from app.api.v1.llms import service as llm_service
 from app.api.v1.assets.service import auto_import_assets
-from app.api.v1.telemetry.service import TelemetryPoller
+from app.api.v1.telemetry.service import TelemetryPoller, backfill_missing_history
 from app.core.logging import setup_logging
 from app.db.engine import create_db_and_tables, engine as db_engine
 from app.core.config import settings
@@ -34,8 +34,12 @@ async def lifespan(app: FastAPI):
     setup_logging()
     create_db_and_tables()
 
-    # Start telemetry poller (polls simulator REST API every 5s, stores in DB)
-    poller = TelemetryPoller(session_factory=lambda: SQLModelSession(db_engine))
+    # Backfill any gap since last shutdown before the live poller starts
+    _sf = lambda: SQLModelSession(db_engine)
+    backfill_missing_history(session_factory=_sf)
+
+    # Start telemetry poller (polls OPC UA connector every 5s, stores in DB)
+    poller = TelemetryPoller(session_factory=_sf)
     poller.start()
 
     async def _startup():

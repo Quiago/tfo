@@ -44,7 +44,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
+import random
 import re
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
@@ -97,6 +99,39 @@ _ROBOT_FIELDS: dict[str, tuple[str, str, str]] = {
 }
 
 _ROBOT_RE = re.compile(r"^Robot(\d+)$")
+
+# ── Synthetic baseline values (signal_id → (base, variance)) ─────────────────
+# Used by backfill_missing_history() to generate realistic-looking history.
+# base    = mid-point of the signal's normal operating range
+# variance = ±spread around the base (peak-to-peak / 2)
+_SIGNAL_BASELINES: dict[str, tuple[float, float]] = {
+    "ambient_temperature": (24.0, 4.0),
+    "zone1_temperature":   (72.0, 8.0),
+    "zone2_temperature":   (68.0, 8.0),
+    "vibration_x":         (2.4,  1.2),
+    "vibration_y":         (1.9,  0.9),
+    "vibration_z":         (1.4,  0.7),
+    "humidity":            (54.0, 12.0),
+    "line_pressure":       (6.2,  0.8),
+    "parts_assembled":     (1200, 150.0),
+    "cycle_time":          (44.0, 8.0),
+    "throughput":          (82.0, 12.0),
+    "defect_rate":         (2.4,  1.2),
+    "yield_rate":          (95.5, 3.0),
+    "total_power":         (148.0, 28.0),
+    "aux_power":           (24.0, 4.0),
+    "power_factor":        (0.92, 0.04),
+    "grid_frequency":      (50.0, 0.15),
+    "energy_today":        (480.0, 90.0),
+    # Robot sub-fields (matched by suffix pattern in backfill)
+    "_speed":              (76.0, 14.0),
+    "_joint_temp":         (44.0, 9.0),
+    "_load":               (118.0, 28.0),
+    "_power":              (4.8,  1.8),
+}
+
+# Number of robots to synthesise history for when the DB is empty.
+_BACKFILL_ROBOT_COUNT = 4
 
 # ── Frontend 4-channel mapping: chart field → signal_id ──────────────────────
 TIMELINE_FIELD_MAP: dict[str, str] = {
@@ -495,6 +530,137 @@ def get_timeline_history(
             result.append(point)
 
     return result
+
+
+def backfill_missing_history(
+    session_factory,
+    connector_id: str = CONNECTOR_ID_DEFAULT,
+) -> None:
+    """Populate TelemetryReading rows for any gap between the last stored
+    reading and now.
+
+    Intended to be called once at startup (before the poller begins) so the
+    frontend timeline always has a full RETENTION_HOURS window even after a
+    server restart.
+
+    Algorithm
+    ---------
+    1. Query MAX(recorded_at) — determines where real data ends.
+    2. If the table is empty → start from now() − RETENTION_HOURS.
+       If data exists → start from last_recorded_at + POLL_INTERVAL.
+    3. Skip if the gap is less than POLL_INTERVAL * 2 seconds (nothing to do).
+    4. Walk from start_dt to now() in POLL_INTERVAL steps, generating one
+       synthetic TelemetryReading per signal per step.
+    5. Bulk insert in commit batches of 1 000 rows.
+
+    Signal values are plausible but synthetic:
+        value = base + sin(elapsed_hours * 0.3) * variance * 0.5
+                     + gauss(0, variance * 0.2)
+
+    Signal list is derived from the DB (re-uses existing signal metadata) and
+    falls back to the static _NODE_INFO + robot catalog when the table is empty.
+    """
+    now = datetime.now(UTC)
+
+    with session_factory() as session:
+        # 1. Find last stored timestamp
+        last_at: datetime | None = session.exec(
+            select(func.max(TelemetryReading.recorded_at))
+        ).first()
+
+        if not last_at:
+            start_dt = now - timedelta(hours=RETENTION_HOURS)
+        else:
+            start_dt = last_at + timedelta(seconds=POLL_INTERVAL)
+
+        gap_seconds = (now - start_dt).total_seconds()
+
+        # 3. Nothing meaningful to fill
+        if gap_seconds < POLL_INTERVAL * 2:
+            logger.info(
+                "[Telemetry] backfill — gap %.0fs < threshold; nothing to do", gap_seconds
+            )
+            return
+
+        # Collect signal metadata from DB (signal_id → (display_name, unit))
+        existing: list[TelemetryReading] = session.exec(
+            select(TelemetryReading).limit(500)
+        ).all()
+
+    sig_meta: dict[str, tuple[str, str]] = {}
+    for r in existing:
+        if r.signal_id not in sig_meta:
+            sig_meta[r.signal_id] = (r.display_name, r.unit)
+
+    # Fall back to static catalog when DB was empty
+    if not sig_meta:
+        for display_name, (signal_id, human_name, unit) in _NODE_INFO.items():
+            sig_meta[signal_id] = (human_name, unit)
+        for n in range(1, _BACKFILL_ROBOT_COUNT + 1):
+            for field_name, (field_id, human_name, unit) in _ROBOT_FIELDS.items():
+                if field_name == "Status":
+                    continue
+                sig_id = f"robot{n}_{field_id}"
+                sig_meta[sig_id] = (f"Robot {n} {human_name}", unit)
+
+    def _baseline(signal_id: str) -> tuple[float, float]:
+        """Return (base, variance) for a given signal_id."""
+        if signal_id in _SIGNAL_BASELINES:
+            return _SIGNAL_BASELINES[signal_id]
+        # Robot sub-field suffix match: e.g. robot3_joint_temp → _joint_temp
+        for suffix, vals in _SIGNAL_BASELINES.items():
+            if suffix.startswith("_") and signal_id.endswith(suffix):
+                return vals
+        return (50.0, 10.0)  # safe generic fallback
+
+    # 4. Generate synthetic readings
+    step = timedelta(seconds=POLL_INTERVAL)
+    signals = list(sig_meta.items())  # [(signal_id, (display_name, unit)), ...]
+
+    batch: list[TelemetryReading] = []
+    total_rows = 0
+    t = start_dt
+
+    while t <= now:
+        elapsed_hours = (t - start_dt).total_seconds() / 3600.0
+        for signal_id, (display_name, unit) in signals:
+            base, variance = _baseline(signal_id)
+            value = (
+                base
+                + math.sin(elapsed_hours * 0.3) * variance * 0.5
+                + random.gauss(0, variance * 0.2)
+            )
+            batch.append(TelemetryReading(
+                connector_id=connector_id,
+                signal_id=signal_id,
+                display_name=display_name,
+                value=round(value, 4),
+                unit=unit,
+                recorded_at=t,
+            ))
+            if len(batch) >= 1000:
+                with session_factory() as session:
+                    session.add_all(batch)
+                    session.commit()
+                total_rows += len(batch)
+                batch = []
+        t += step
+
+    # Flush remainder
+    if batch:
+        with session_factory() as session:
+            session.add_all(batch)
+            session.commit()
+        total_rows += len(batch)
+
+    logger.info(
+        "[Telemetry] backfill — inserted %d rows covering %s → %s (%.1f h, %d signals)",
+        total_rows,
+        start_dt.strftime("%Y-%m-%d %H:%M UTC"),
+        now.strftime("%Y-%m-%d %H:%M UTC"),
+        gap_seconds / 3600,
+        len(signals),
+    )
 
 
 def get_channel_metadata(session: Session) -> list[dict]:
