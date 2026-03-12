@@ -3,6 +3,7 @@ import contextlib
 import multiprocessing
 import os
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 # ── vLLM multiprocessing fix ───────────────────────────────────────────────────
 # vLLM V1 (≥0.6) spawns EngineCore as a subprocess. On Linux the default
@@ -18,6 +19,7 @@ if multiprocessing.get_start_method(allow_none=True) != "spawn":
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlmodel import Session, Session as SQLModelSession
 
 from app.api.v1.router import api_router
@@ -77,4 +79,15 @@ app.include_router(api_router)
 @app.get("/")
 async def root():
     return {"message": "Tripolar Industries API"}
+
+
+@app.get("/health")
+async def health() -> JSONResponse:
+    """Liveness probe — no auth required.
+
+    Returns 200 as soon as the FastAPI process is up and accepting requests.
+    The frontend polls this endpoint after waking the RunPod pod to know
+    when the server is ready to accept API calls.
+    """
+    return JSONResponse({"status": "ok", "timestamp": datetime.now(UTC).isoformat()})
 
