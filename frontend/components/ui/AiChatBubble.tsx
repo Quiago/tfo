@@ -259,6 +259,7 @@ export function AiChatBubble() {
     // Error
     const [error, setError] = useState<string | null>(null)
     const [noModelLoaded, setNoModelLoaded] = useState(false)
+    const pendingRetryRef = useRef<string | null>(null)
 
     // Agent mode
     const [agentMode, setAgentMode] = useState(false)
@@ -334,6 +335,15 @@ export function AiChatBubble() {
         window.addEventListener('click', h)
         return () => window.removeEventListener('click', h)
     }, [modelDropdown])
+
+    // ── Model-not-ready handler (defined before handleSend to avoid circular dep) ──
+    /** Cleans up the failed bubble, restores input, queues auto-retry. */
+    const handleModelNotReady = useCallback((content: string) => {
+        setMessages(prev => prev.filter(m => m.id !== streamingIdRef.current))
+        setInput(content)
+        pendingRetryRef.current = content
+        setNoModelLoaded(true)
+    }, [])
 
     // ── Send message ───────────────────────────────────────────────────────
     const handleSend = useCallback(async (text?: string) => {
@@ -451,7 +461,7 @@ export function AiChatBubble() {
                         case 'error': {
                             const errMsg = event.error ?? 'Agent error'
                             if (errMsg.toLowerCase().includes('no model loaded')) {
-                                setNoModelLoaded(true)
+                                handleModelNotReady(content)
                             } else {
                                 setError(errMsg)
                             }
@@ -518,7 +528,7 @@ export function AiChatBubble() {
                     case 'error': {
                         const errMsg = event.error ?? 'Stream error'
                         if (errMsg.toLowerCase().includes('no model loaded')) {
-                            setNoModelLoaded(true)
+                            handleModelNotReady(content)
                         } else {
                             setError(errMsg)
                         }
@@ -548,7 +558,30 @@ export function AiChatBubble() {
             setStreaming(false)
             abortRef.current = null
         }
-    }, [input, streaming, activeConvId, currentModelId, catalog?.default_model, agentMode, screenCtx])
+    }, [input, streaming, activeConvId, currentModelId, catalog?.default_model, agentMode, screenCtx, handleModelNotReady])
+
+    // ── Auto-retry: poll catalog until model ready, then resend ───────────────
+    useEffect(() => {
+        if (!noModelLoaded) return
+        const interval = setInterval(async () => {
+            try {
+                const cat = await getModelCatalog()
+                const ready = cat.models.some(m => m.is_loaded)
+                if (ready) {
+                    setCatalog(cat)
+                    setCurrentModelId(cat.current_model ?? cat.default_model)
+                    setNoModelLoaded(false)
+                    const pending = pendingRetryRef.current
+                    if (pending) {
+                        pendingRetryRef.current = null
+                        // Let state settle before firing
+                        setTimeout(() => void handleSend(pending), 100)
+                    }
+                }
+            } catch { /* ignore poll errors */ }
+        }, 3_000)
+        return () => clearInterval(interval)
+    }, [noModelLoaded, handleSend])
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -1004,12 +1037,15 @@ export function AiChatBubble() {
                             ))}
                         </div>
 
-                        {/* No model loaded banner — server is warming up */}
+                        {/* No model loaded banner — auto-retries every 3s */}
                         {noModelLoaded && (
                             <div className="mx-3 mb-2 flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 text-xs">
                                 <Loader2 size={13} className="animate-spin flex-shrink-0" />
-                                <span className="flex-1">Model loading on server, please wait a moment and try again.</span>
-                                <button onClick={() => setNoModelLoaded(false)} className="flex-shrink-0 hover:text-amber-900">
+                                <span className="flex-1">
+                                    Model warming up
+                                    {pendingRetryRef.current ? ' — will resend your message automatically.' : '.'}
+                                </span>
+                                <button onClick={() => { setNoModelLoaded(false); pendingRetryRef.current = null }} className="flex-shrink-0 hover:text-amber-900">
                                     <X size={12} />
                                 </button>
                             </div>
