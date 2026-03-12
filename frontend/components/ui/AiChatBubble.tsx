@@ -5,12 +5,14 @@ import {
     deleteMemory, getMessages, listConversations,
     listMemories, streamMessage,
 } from '@/lib/services/chat.service'
+import { runAgent, serialiseScreenContext, type UIAction } from '@/lib/services/agent.service'
+import { useScreenContext } from '@/lib/store/screen-context-store'
 import { deleteDocument, listDocuments, uploadDocument } from '@/lib/services/knowledge-base.service'
 import { getModelCatalog, loadModel } from '@/lib/services/llm.service'
 import type { Conversation, KBDocument, LocalMessage, MemoryEntry, ModelCatalog, ToolCallEntry } from '@/lib/types/chat'
 import type { LucideIcon } from 'lucide-react'
 import {
-    AlertCircle, ArrowUp, BookOpen, Brain, ChevronDown,
+    AlertCircle, ArrowUp, BookOpen, Bot, Brain, ChevronDown,
     FileText, Loader2, MessageSquare, Paperclip, Plus,
     Sparkles, Trash2, Upload, Wrench, X,
 } from 'lucide-react'
@@ -215,6 +217,10 @@ export function AiChatBubble() {
     const [error, setError] = useState<string | null>(null)
     const [noModelLoaded, setNoModelLoaded] = useState(false)
 
+    // Agent mode
+    const [agentMode, setAgentMode] = useState(false)
+    const screenCtx = useScreenContext()
+
     // ── Auto-scroll ────────────────────────────────────────────────────────
     const scrollToBottom = useCallback(() => {
         if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
@@ -334,6 +340,89 @@ export function AiChatBubble() {
         abortRef.current = abort
 
         try {
+            // ── Agent mode ────────────────────────────────────────────────────
+            if (agentMode) {
+                const agentRequest = {
+                    prompt: content,
+                    screen_context: serialiseScreenContext(screenCtx),
+                }
+                for await (const event of runAgent(agentRequest, abort.signal)) {
+                    if (abort.signal.aborted) break
+                    switch (event.type) {
+                        case 'plan':
+                            setMessages(prev => prev.map(m =>
+                                m.id === streamingIdRef.current
+                                    ? { ...m, agent_plan: event.plan }
+                                    : m
+                            ))
+                            break
+                        case 'token':
+                            setMessages(prev => prev.map(m =>
+                                m.id === streamingIdRef.current
+                                    ? { ...m, content: m.content + (event.content ?? '') }
+                                    : m
+                            ))
+                            break
+                        case 'thinking':
+                            setMessages(prev => prev.map(m =>
+                                m.id === streamingIdRef.current
+                                    ? { ...m, thinking: event.content ?? '' }
+                                    : m
+                            ))
+                            break
+                        case 'tool_call':
+                            setMessages(prev => prev.map(m => {
+                                if (m.id !== streamingIdRef.current) return m
+                                const entry: ToolCallEntry = {
+                                    name: event.tool_name ?? 'unknown',
+                                    arguments: event.tool_args,
+                                }
+                                return { ...m, tool_calls: [...(m.tool_calls ?? []), entry] }
+                            }))
+                            break
+                        case 'tool_result':
+                            setMessages(prev => prev.map(m => {
+                                if (m.id !== streamingIdRef.current) return m
+                                const calls = [...(m.tool_calls ?? [])]
+                                const idx = calls.findLastIndex(tc => tc.result === undefined)
+                                if (idx >= 0) {
+                                    calls[idx] = { ...calls[idx], result: event.tool_result_preview ?? '' }
+                                }
+                                return { ...m, tool_calls: calls }
+                            }))
+                            break
+                        case 'ui_action':
+                            // Execute immediately: highlight_range writes to screen context
+                            if (event.ui_action?.type === 'highlight_range') {
+                                const { start, end } = event.ui_action.payload as { start: number; end: number }
+                                if (start && end) screenCtx.setDateRange({ start, end })
+                            }
+                            break
+                        case 'done':
+                            setMessages(prev => prev.map(m =>
+                                m.id === streamingIdRef.current
+                                    ? { ...m, streaming: false, agent_ui_actions: event.ui_actions ?? [] }
+                                    : m
+                            ))
+                            break
+                        case 'error': {
+                            const errMsg = event.error ?? 'Agent error'
+                            if (errMsg.toLowerCase().includes('no model loaded')) {
+                                setNoModelLoaded(true)
+                            } else {
+                                setError(errMsg)
+                            }
+                            break
+                        }
+                    }
+                }
+                setMessages(prev => prev.map(m =>
+                    m.id === streamingIdRef.current ? { ...m, streaming: false } : m
+                ))
+                return
+            }
+
+            // ── Chat mode ─────────────────────────────────────────────────────
             let finalMessageId: string | null = null
 
             for await (const event of streamMessage(convId, content, {}, abort.signal)) {
@@ -416,7 +505,7 @@ export function AiChatBubble() {
             setStreaming(false)
             abortRef.current = null
         }
-    }, [input, streaming, activeConvId, currentModelId, catalog?.default_model])
+    }, [input, streaming, activeConvId, currentModelId, catalog?.default_model, agentMode, screenCtx])
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -713,9 +802,26 @@ export function AiChatBubble() {
                                 <Plus size={14} />
                             </button>
 
+                            {/* Agent mode toggle */}
+                            <button
+                                onClick={() => setAgentMode(v => !v)}
+                                title={agentMode ? 'Switch to Chat mode' : 'Switch to Agent mode — AI acts autonomously using screen context'}
+                                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors flex-shrink-0 border ${
+                                    agentMode
+                                        ? 'bg-violet-100 border-violet-300 text-violet-700'
+                                        : 'bg-transparent border-transparent text-[#98A6D4] hover:bg-[#F2F5FF] hover:text-[#3A3A3A]'
+                                }`}
+                            >
+                                <Bot size={11} />
+                                <span className="hidden sm:inline">{agentMode ? 'Agent' : 'Chat'}</span>
+                            </button>
+
                             {/* Title */}
                             <span className="text-sm font-bold text-[#3A3A3A] flex-1 truncate min-w-0">
-                                {activeConv?.title ?? 'New conversation'}
+                                {agentMode
+                                    ? (screenCtx.selectedTeamName ? `Agent · ${screenCtx.selectedTeamName}` : 'Agent mode')
+                                    : (activeConv?.title ?? 'New conversation')
+                                }
                             </span>
 
                             {/* Model switcher */}
@@ -772,17 +878,36 @@ export function AiChatBubble() {
                         >
                             {messages.length === 0 && !streaming && (
                                 <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-6">
-                                    <div className="h-10 w-10 rounded-full bg-cyan-500/10 flex items-center justify-center">
-                                        <Sparkles size={20} className="text-cyan-500" />
+                                    <div className={`h-10 w-10 rounded-full flex items-center justify-center ${agentMode ? 'bg-violet-500/10' : 'bg-cyan-500/10'}`}>
+                                        {agentMode
+                                            ? <Bot size={20} className="text-violet-500" />
+                                            : <Sparkles size={20} className="text-cyan-500" />
+                                        }
                                     </div>
                                     <div>
-                                        <p className="text-sm font-semibold text-[#3A3A3A]">New conversation</p>
-                                        <p className="text-xs text-[#6B7280] mt-0.5">
-                                            Ask anything about your facility.
-                                            {conversations.length > 0 && (
-                                                <> Previous chats are in the <span className="font-medium text-[#3A3A3A]">Chats</span> panel.</>
-                                            )}
-                                        </p>
+                                        {agentMode ? (
+                                            <>
+                                                <p className="text-sm font-semibold text-[#3A3A3A]">Agent mode</p>
+                                                <p className="text-xs text-[#6B7280] mt-0.5 leading-relaxed">
+                                                    The agent knows where you are.
+                                                </p>
+                                                {screenCtx.activeModule && (
+                                                    <p className="text-[10px] text-violet-600 mt-2 font-mono bg-violet-50 border border-violet-100 rounded-lg px-2 py-1.5 text-left">
+                                                        {screenCtx.getAIContextSummary()}
+                                                    </p>
+                                                )}
+                                            </>
+                                        ) : (
+                                            <>
+                                                <p className="text-sm font-semibold text-[#3A3A3A]">New conversation</p>
+                                                <p className="text-xs text-[#6B7280] mt-0.5">
+                                                    Ask anything about your facility.
+                                                    {conversations.length > 0 && (
+                                                        <> Previous chats are in the <span className="font-medium text-[#3A3A3A]">Chats</span> panel.</>
+                                                    )}
+                                                </p>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                             )}
@@ -796,6 +921,21 @@ export function AiChatBubble() {
                                     )}
 
                                     <div className={`flex flex-col gap-1 ${msg.role === 'user' ? 'items-end max-w-[80%]' : 'items-start max-w-[85%]'}`}>
+                                        {/* Agent plan steps */}
+                                        {msg.agent_plan && msg.agent_plan.length > 0 && (
+                                            <div className="my-1 rounded-xl border border-violet-100 bg-violet-50/60 text-xs overflow-hidden w-full">
+                                                <div className="flex items-center gap-2 px-3 py-2 border-b border-violet-100">
+                                                    <Bot size={11} className="text-violet-500 flex-shrink-0" />
+                                                    <span className="font-semibold text-violet-600">Plan</span>
+                                                </div>
+                                                <ol className="px-3 py-2 space-y-1 list-decimal list-inside">
+                                                    {msg.agent_plan.map((step, i) => (
+                                                        <li key={i} className="text-[11px] text-violet-700 leading-snug">{step}</li>
+                                                    ))}
+                                                </ol>
+                                            </div>
+                                        )}
+
                                         {/* Thinking block */}
                                         {msg.thinking && <ThinkingBlock content={msg.thinking} />}
 
@@ -803,6 +943,30 @@ export function AiChatBubble() {
                                         {msg.tool_calls?.map((tc, i) => (
                                             <ToolCallCard key={i} toolCall={tc} />
                                         ))}
+
+                                        {/* Agent UI actions — clickable suggestion cards */}
+                                        {msg.agent_ui_actions && msg.agent_ui_actions.length > 0 && (
+                                            <div className="flex flex-col gap-1 w-full">
+                                                {msg.agent_ui_actions.map((action, i) => (
+                                                    <button
+                                                        key={i}
+                                                        onClick={() => {
+                                                            if (action.type === 'highlight_range') {
+                                                                const { start, end } = action.payload as { start: number; end: number }
+                                                                if (start && end) screenCtx.setDateRange({ start, end })
+                                                            }
+                                                        }}
+                                                        className="flex items-center gap-2 px-3 py-2 rounded-xl bg-sky-50 border border-sky-200 text-sky-700 text-xs hover:bg-sky-100 transition-colors text-left w-full"
+                                                    >
+                                                        <Sparkles size={11} className="flex-shrink-0 text-sky-500" />
+                                                        <span className="font-medium capitalize">{action.type.replace(/_/g, ' ')}</span>
+                                                        {action.type === 'highlight_range' && (
+                                                            <span className="text-sky-500 text-[10px] ml-auto">Click to apply</span>
+                                                        )}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
 
                                         {/* Content bubble */}
                                         {(msg.content || msg.streaming) && (
@@ -886,7 +1050,7 @@ export function AiChatBubble() {
                                     value={input}
                                     onChange={e => setInput(e.target.value)}
                                     onKeyDown={handleKeyDown}
-                                    placeholder={streaming ? 'Generating...' : 'Ask OpsFlow AI...'}
+                                    placeholder={streaming ? 'Agent thinking...' : agentMode ? 'Ask the agent — it sees your screen context...' : 'Ask OpsFlow AI...'}
                                     disabled={streaming}
                                     rows={1}
                                     className="flex-1 bg-transparent border-none outline-none text-sm text-[#3A3A3A] placeholder:text-zinc-400 resize-none min-h-[24px] max-h-[80px] py-1 disabled:opacity-50"

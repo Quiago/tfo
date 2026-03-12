@@ -37,6 +37,10 @@ export interface LocalMessage {
     thinking?: string
     created_at: string
     streaming?: boolean
+    /** Agent mode: plan steps shown before the answer */
+    agent_plan?: string[]
+    /** Agent mode: UI actions returned in the final step */
+    agent_ui_actions?: import('@/lib/services/agent.service').UIAction[]
 }
 
 // ─── SSE EVENTS ───────────────────────────────────────────────────────────────

@@ -22,7 +22,7 @@ export interface DateRange {
     end: number;
 }
 
-interface ScreenContextState {
+export interface ScreenContextState {
     /** Which top-level module the user is viewing. */
     activeModule: TfoModule;
 
