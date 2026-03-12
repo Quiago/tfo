@@ -17,9 +17,9 @@ if multiprocessing.get_start_method(allow_none=True) != "spawn":
     multiprocessing.set_start_method("spawn", force=True)
 # ──────────────────────────────────────────────────────────────────────────────
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlmodel import Session, Session as SQLModelSession
 
 from app.api.v1.router import api_router
@@ -62,6 +62,17 @@ async def lifespan(app: FastAPI):
         await startup_task
 
 
+# ── Activity tracker ──────────────────────────────────────────────────────────
+# Timestamp of the most recent non-probe request. Used by RunPod auto-stop
+# scripts to decide when the pod has been idle long enough to shut down.
+# Module-level so the middleware closure and the metrics endpoint share state
+# without needing a dependency or a singleton class.
+_last_request_at: datetime | None = None
+
+# Paths that should not reset the idle timer (health probes + this metric itself)
+_PROBE_PATHS = frozenset({"/health", "/metrics/last-request-seconds-ago"})
+
+
 app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
@@ -76,9 +87,32 @@ app.add_middleware(
 app.include_router(api_router)
 
 
+@app.middleware("http")
+async def _track_last_request(request: Request, call_next):
+    global _last_request_at
+    if request.url.path not in _PROBE_PATHS:
+        _last_request_at = datetime.now(UTC)
+    return await call_next(request)
+
+
 @app.get("/")
 async def root():
     return {"message": "Tripolar Industries API"}
+
+
+@app.get("/metrics/last-request-seconds-ago", response_class=PlainTextResponse)
+async def last_request_seconds_ago() -> PlainTextResponse:
+    """Idle-time probe — no auth required.
+
+    Returns a plain-text integer: seconds elapsed since the last non-probe
+    request. Returns "0" when no real request has been recorded yet (i.e.
+    the server just started). Used by RunPod auto-stop scripts to decide
+    when the pod has been idle long enough to terminate.
+    """
+    if _last_request_at is None:
+        return PlainTextResponse("0")
+    elapsed = int((datetime.now(UTC) - _last_request_at).total_seconds())
+    return PlainTextResponse(str(elapsed))
 
 
 @app.get("/health")
