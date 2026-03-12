@@ -1,9 +1,10 @@
 """
 agent/tools.py — Tool registry for the Agent domain.
 
-Extends the shared chat tool registry with two platform-aware tools that
+Extends the shared chat tool registry with three platform-aware tools that
 leverage Screen Context — no asset ID or time range required from the user:
 
+  • get_screen_context      — returns current UI state as structured JSON (fast-path for "what am I seeing?" questions)
   • analyze_focused_asset   — queries stats for the asset currently in focus
   • analyze_selected_range  — queries telemetry for the range drawn on Timeline
 
@@ -25,6 +26,24 @@ logger = logging.getLogger(__name__)
 # ── Screen-aware tool schemas (OpenAI format) ─────────────────────────────────
 
 PLATFORM_TOOL_SCHEMAS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_screen_context",
+            "description": (
+                "Returns a structured snapshot of what the user is currently viewing on the dashboard: "
+                "active module, asset in focus, connector, granularity, and selected timeline range. "
+                "Call this FIRST when the user asks 'what am I seeing?', 'where am I?', 'what is in focus?', "
+                "'what module is this?', or any question about the current UI state. "
+                "Do NOT call list_assets or sensor tools for these questions."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -67,6 +86,29 @@ PLATFORM_TOOL_SCHEMAS: list[dict] = [
 
 # ── Platform tool implementations ─────────────────────────────────────────────
 
+async def _get_screen_context(
+    screen_context: ScreenContext,
+    session: Session,  # noqa: ARG001 — kept for dispatcher uniformity
+) -> str:
+    """Serialise the current screen context as observable data for the model."""
+    has_range = bool(screen_context.date_range_start and screen_context.date_range_end)
+    payload: dict[str, Any] = {
+        "active_module": screen_context.active_module,
+        "asset_in_focus": screen_context.selected_team_name or "none",
+        "asset_id": screen_context.selected_team_id,
+        "connector": screen_context.active_connector_id or "none",
+        "granularity": screen_context.granularity or "Day",
+        "timeline_range_selected": has_range,
+        "summary": screen_context.summary,
+    }
+    if has_range:
+        payload["timeline_range_start_ms"] = screen_context.date_range_start
+        payload["timeline_range_end_ms"] = screen_context.date_range_end
+    logger.info("agent_tool — get_screen_context module=%s asset=%s",
+                screen_context.active_module, screen_context.selected_team_id)
+    return json.dumps(payload)
+
+
 async def _analyze_focused_asset(
     screen_context: ScreenContext,
     session: Session,
@@ -103,6 +145,7 @@ async def _analyze_selected_range(
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 
 _PLATFORM_REGISTRY: dict[str, Any] = {
+    "get_screen_context": _get_screen_context,
     "analyze_focused_asset": _analyze_focused_asset,
     "analyze_selected_range": _analyze_selected_range,
 }

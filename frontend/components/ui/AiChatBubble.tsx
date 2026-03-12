@@ -13,7 +13,7 @@ import type { Conversation, KBDocument, LocalMessage, MemoryEntry, ModelCatalog,
 import type { LucideIcon } from 'lucide-react'
 import {
     AlertCircle, ArrowUp, BookOpen, Bot, Brain, ChevronDown,
-    FileText, Loader2, MessageSquare, Paperclip, Plus,
+    FileText, Loader2, MessageSquare, Monitor, Paperclip, Plus,
     Sparkles, Trash2, Upload, Wrench, X,
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react'
@@ -167,6 +167,49 @@ function ThinkingBlock({ content }: { content: string }) {
             )}
         </div>
     )
+}
+
+// ─── CONTEXT SUGGESTIONS ──────────────────────────────────────────────────────
+
+interface ContextSuggestion {
+    label: string
+    prompt: string
+    Icon: LucideIcon
+}
+
+/**
+ * Derives 2-4 contextual quick-action suggestions from the live screen state.
+ * No hardcoded copy — everything is derived from what the user is currently viewing.
+ */
+function getContextSuggestions(
+    activeModule: string,
+    assetName: string | null,
+    hasRange: boolean,
+    agentMode: boolean,
+): ContextSuggestion[] {
+    const out: ContextSuggestion[] = []
+
+    if (agentMode) {
+        if (assetName) {
+            out.push({ label: `Analyze ${assetName}`, prompt: `Analyze the current status of ${assetName} and flag any anomalies.`, Icon: Sparkles })
+            out.push({ label: `Recent alerts for ${assetName}`, prompt: `Are there any anomalies or out-of-range readings for ${assetName} in the last 30 minutes?`, Icon: AlertCircle })
+        } else {
+            out.push({ label: 'What am I looking at?', prompt: 'What am I currently looking at on the dashboard?', Icon: Monitor })
+        }
+        if (hasRange) {
+            out.push({ label: 'Analyze selected range', prompt: 'Analyze the time range I selected on the timeline and summarize what happened.', Icon: Wrench })
+        }
+        out.push({ label: `Summarize ${activeModule}`, prompt: `Give me a concise summary of the ${activeModule} view and the most important things to know right now.`, Icon: BookOpen })
+    } else {
+        out.push({ label: 'Sensor statistics', prompt: 'Show me the latest sensor statistics across all assets.', Icon: Wrench })
+        if (assetName) {
+            out.push({ label: `Ask about ${assetName}`, prompt: `Tell me about ${assetName} and its recent performance.`, Icon: MessageSquare })
+        }
+        out.push({ label: 'Asset overview', prompt: 'List all assets and their current operational status.', Icon: Sparkles })
+        out.push({ label: 'Knowledge base', prompt: 'What documents do you have in the knowledge base that are relevant to my current equipment?', Icon: BookOpen })
+    }
+
+    return out.slice(0, 4)
 }
 
 // ─── SIDE PANEL TAB TYPE ──────────────────────────────────────────────────────
@@ -824,43 +867,6 @@ export function AiChatBubble() {
                                 }
                             </span>
 
-                            {/* Model switcher */}
-                            <div className="relative flex-shrink-0" onClick={e => e.stopPropagation()}>
-                                <button
-                                    onClick={() => setModelDropdown(v => !v)}
-                                    disabled={loadingModel || !catalog}
-                                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold bg-[#F2F5FF] text-[#3A3A3A] hover:bg-[#E8EDFF] transition-colors disabled:opacity-50 max-w-[100px]"
-                                >
-                                    {loadingModel
-                                        ? <Loader2 size={10} className="animate-spin flex-shrink-0" />
-                                        : null
-                                    }
-                                    <span className="truncate">{currentModel?.display_name ?? currentModelId ?? '—'}</span>
-                                    <ChevronDown size={10} className="flex-shrink-0" />
-                                </button>
-                                {modelDropdown && catalog && (
-                                    <div className="absolute top-full right-0 mt-1 w-60 bg-white border border-[#98A6D4] rounded-xl shadow-xl z-20 py-1 overflow-hidden">
-                                        {catalog.models.map(m => (
-                                            <button
-                                                key={m.id}
-                                                onClick={() => void handleLoadModel(m.id)}
-                                                className={`w-full flex items-start gap-2 px-3 py-2.5 text-left hover:bg-[#F2F5FF] transition-colors ${m.id === currentModelId ? 'bg-[#F2F5FF]' : ''}`}
-                                            >
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="text-xs font-semibold text-[#3A3A3A] truncate">{m.display_name}</p>
-                                                    <p className="text-[10px] text-zinc-400 mt-0.5">
-                                                        {m.memory_required_gb.toFixed(1)} GB · {m.context_length.toLocaleString()} ctx
-                                                    </p>
-                                                </div>
-                                                {m.is_loaded && (
-                                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 flex-shrink-0" title="Loaded" />
-                                                )}
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-
                             {/* Close */}
                             <button
                                 onClick={() => setOpen(false)}
@@ -877,37 +883,37 @@ export function AiChatBubble() {
                             className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#FDFEFE] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-zinc-200 [&::-webkit-scrollbar-thumb]:rounded-full"
                         >
                             {messages.length === 0 && !streaming && (
-                                <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-6">
-                                    <div className={`h-10 w-10 rounded-full flex items-center justify-center ${agentMode ? 'bg-violet-500/10' : 'bg-cyan-500/10'}`}>
-                                        {agentMode
-                                            ? <Bot size={20} className="text-violet-500" />
-                                            : <Sparkles size={20} className="text-cyan-500" />
-                                        }
+                                <div className="flex flex-col justify-center h-full gap-4 px-4 py-6">
+                                    {/* Header */}
+                                    <div className="flex flex-col items-center gap-2 text-center">
+                                        <div className={`h-9 w-9 rounded-full flex items-center justify-center ${agentMode ? 'bg-violet-500/10' : 'bg-cyan-500/10'}`}>
+                                            {agentMode
+                                                ? <Bot size={18} className="text-violet-500" />
+                                                : <Sparkles size={18} className="text-cyan-500" />
+                                            }
+                                        </div>
+                                        <p className="text-sm font-semibold text-[#3A3A3A]">
+                                            {agentMode ? 'How can I help you today?' : 'Ask OpsFlow AI'}
+                                        </p>
                                     </div>
-                                    <div>
-                                        {agentMode ? (
-                                            <>
-                                                <p className="text-sm font-semibold text-[#3A3A3A]">Agent mode</p>
-                                                <p className="text-xs text-[#6B7280] mt-0.5 leading-relaxed">
-                                                    The agent knows where you are.
-                                                </p>
-                                                {screenCtx.activeModule && (
-                                                    <p className="text-[10px] text-violet-600 mt-2 font-mono bg-violet-50 border border-violet-100 rounded-lg px-2 py-1.5 text-left">
-                                                        {screenCtx.getAIContextSummary()}
-                                                    </p>
-                                                )}
-                                            </>
-                                        ) : (
-                                            <>
-                                                <p className="text-sm font-semibold text-[#3A3A3A]">New conversation</p>
-                                                <p className="text-xs text-[#6B7280] mt-0.5">
-                                                    Ask anything about your facility.
-                                                    {conversations.length > 0 && (
-                                                        <> Previous chats are in the <span className="font-medium text-[#3A3A3A]">Chats</span> panel.</>
-                                                    )}
-                                                </p>
-                                            </>
-                                        )}
+
+                                    {/* Suggestion pills — derived from screen context, not hardcoded */}
+                                    <div className="flex flex-col gap-1.5">
+                                        {getContextSuggestions(
+                                            screenCtx.activeModule,
+                                            screenCtx.selectedTeamName,
+                                            !!(screenCtx.dateRange),
+                                            agentMode,
+                                        ).map((s, i) => (
+                                            <button
+                                                key={i}
+                                                onClick={() => void handleSend(s.prompt)}
+                                                className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-[#F7F9FF] border border-[rgba(152,166,212,0.2)] text-[#3A3A3A] text-xs hover:bg-[#EEF1FF] hover:border-[#98A6D4] transition-colors text-left group"
+                                            >
+                                                <s.Icon size={13} className="text-[#98A6D4] group-hover:text-[#3A3A3A] flex-shrink-0 transition-colors" />
+                                                <span className="flex-1 leading-tight">{s.label}</span>
+                                            </button>
+                                        ))}
                                     </div>
                                 </div>
                             )}
@@ -1031,50 +1037,108 @@ export function AiChatBubble() {
 
                         {/* Input */}
                         <div className="p-3 border-t border-[rgba(152,166,212,0.1)] bg-[#FDFEFE] flex-shrink-0">
-                            <div className={`flex items-center gap-1.5 bg-[#F2F5FF] border rounded-[28px] px-3 py-1.5 transition-colors ${streaming ? 'border-[#98A6D4]' : 'border-[#98A6D4] focus-within:border-blue-400 focus-within:bg-white'}`}>
-                                {/* Attach file */}
-                                <button
-                                    onClick={() => fileInputRef.current?.click()}
-                                    disabled={uploadingDoc}
-                                    title="Upload document to knowledge base"
-                                    className="w-7 h-7 flex items-center justify-center text-zinc-400 hover:text-[#3A3A3A] transition-colors flex-shrink-0 disabled:opacity-40"
-                                >
-                                    {uploadingDoc
-                                        ? <Loader2 size={15} className="animate-spin" />
-                                        : <Paperclip size={15} />
-                                    }
-                                </button>
+                            <div className={`flex flex-col bg-[#F2F5FF] border rounded-[16px] px-3 pt-2 pb-1.5 transition-colors ${streaming ? 'border-[#98A6D4]' : 'border-[#98A6D4] focus-within:border-blue-400 focus-within:bg-white'}`}>
 
+                                {/* Context chip — Notion-style: shows where the user is */}
+                                {screenCtx.activeModule && (
+                                    <div className="flex items-center gap-1 mb-1.5 -mx-0.5">
+                                        <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white border border-[rgba(152,166,212,0.25)] text-[10px] text-zinc-500 max-w-full overflow-hidden">
+                                            <Monitor size={9} className="text-[#98A6D4] flex-shrink-0" />
+                                            <span className="truncate">{screenCtx.getAIContextSummary()}</span>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Textarea */}
                                 <textarea
                                     ref={inputRef}
                                     value={input}
                                     onChange={e => setInput(e.target.value)}
                                     onKeyDown={handleKeyDown}
-                                    placeholder={streaming ? 'Agent thinking...' : agentMode ? 'Ask the agent — it sees your screen context...' : 'Ask OpsFlow AI...'}
+                                    placeholder={streaming ? 'Thinking...' : agentMode ? 'Ask anything — agent sees your screen...' : 'Ask OpsFlow AI...'}
                                     disabled={streaming}
                                     rows={1}
-                                    className="flex-1 bg-transparent border-none outline-none text-sm text-[#3A3A3A] placeholder:text-zinc-400 resize-none min-h-[24px] max-h-[80px] py-1 disabled:opacity-50"
+                                    className="bg-transparent border-none outline-none text-sm text-[#3A3A3A] placeholder:text-zinc-400 resize-none min-h-[24px] max-h-[80px] py-0.5 disabled:opacity-50 w-full"
                                 />
-                                {streaming ? (
+
+                                {/* Bottom toolbar: attach · model selector · send */}
+                                <div className="flex items-center justify-between mt-1.5">
+                                    {/* Left: attach */}
                                     <button
-                                        onClick={() => abortRef.current?.abort()}
-                                        title="Stop generation"
-                                        className="w-8 h-8 rounded-full bg-red-500 text-white flex items-center justify-center flex-shrink-0 hover:bg-red-600 transition-colors"
+                                        onClick={() => fileInputRef.current?.click()}
+                                        disabled={uploadingDoc}
+                                        title="Upload document to knowledge base"
+                                        className="w-6 h-6 flex items-center justify-center text-zinc-400 hover:text-[#3A3A3A] transition-colors flex-shrink-0 disabled:opacity-40"
                                     >
-                                        <X size={14} />
+                                        {uploadingDoc
+                                            ? <Loader2 size={13} className="animate-spin" />
+                                            : <Paperclip size={13} />
+                                        }
                                     </button>
-                                ) : (
-                                    <button
-                                        onClick={() => void handleSend()}
-                                        disabled={!input.trim()}
-                                        className="w-8 h-8 rounded-full bg-[#3A3A3A] text-white flex items-center justify-center flex-shrink-0 hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
-                                    >
-                                        <ArrowUp size={14} />
-                                    </button>
-                                )}
+
+                                    {/* Right: model selector + send */}
+                                    <div className="flex items-center gap-1.5">
+                                        {/* Model picker — Notion "Auto" style */}
+                                        <div className="relative" onClick={e => e.stopPropagation()}>
+                                            <button
+                                                onClick={() => setModelDropdown(v => !v)}
+                                                disabled={loadingModel || !catalog}
+                                                title="Switch model"
+                                                className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium text-zinc-500 hover:bg-white hover:text-[#3A3A3A] transition-colors disabled:opacity-40 max-w-[110px]"
+                                            >
+                                                {loadingModel
+                                                    ? <Loader2 size={9} className="animate-spin flex-shrink-0" />
+                                                    : null
+                                                }
+                                                <span className="truncate">{currentModel?.display_name ?? currentModelId ?? 'Auto'}</span>
+                                                <ChevronDown size={9} className="flex-shrink-0 text-zinc-400" />
+                                            </button>
+                                            {modelDropdown && catalog && (
+                                                <div className="absolute bottom-full right-0 mb-1 w-64 bg-white border border-[#98A6D4] rounded-xl shadow-xl z-20 py-1 overflow-hidden">
+                                                    {catalog.models.map(m => (
+                                                        <button
+                                                            key={m.id}
+                                                            onClick={() => void handleLoadModel(m.id)}
+                                                            className={`w-full flex items-start gap-2 px-3 py-2.5 text-left hover:bg-[#F2F5FF] transition-colors ${m.id === currentModelId ? 'bg-[#F2F5FF]' : ''}`}
+                                                        >
+                                                            <div className="flex-1 min-w-0">
+                                                                <p className="text-xs font-semibold text-[#3A3A3A] truncate">{m.display_name}</p>
+                                                                <p className="text-[10px] text-zinc-400 mt-0.5">
+                                                                    {m.memory_required_gb.toFixed(1)} GB · {m.context_length.toLocaleString()} ctx
+                                                                </p>
+                                                            </div>
+                                                            {m.is_loaded && (
+                                                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 flex-shrink-0" title="Loaded" />
+                                                            )}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Send / Stop */}
+                                        {streaming ? (
+                                            <button
+                                                onClick={() => abortRef.current?.abort()}
+                                                title="Stop generation"
+                                                className="w-7 h-7 rounded-full bg-red-500 text-white flex items-center justify-center flex-shrink-0 hover:bg-red-600 transition-colors"
+                                            >
+                                                <X size={12} />
+                                            </button>
+                                        ) : (
+                                            <button
+                                                onClick={() => void handleSend()}
+                                                disabled={!input.trim()}
+                                                className="w-7 h-7 rounded-full bg-[#3A3A3A] text-white flex items-center justify-center flex-shrink-0 hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+                                            >
+                                                <ArrowUp size={12} />
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
                             </div>
                             {uploadingDoc && (
-                                <p className="text-[10px] text-zinc-400 mt-1.5 ml-3">Uploading document...</p>
+                                <p className="text-[10px] text-zinc-400 mt-1.5 ml-2">Uploading document...</p>
                             )}
                         </div>
                     </div>

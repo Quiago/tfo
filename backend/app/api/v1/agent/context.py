@@ -52,6 +52,15 @@ CRITICAL RULES:
 • After getting enough data, go directly to FINAL — do not over-query.
 • ui_actions is optional in FINAL: use it to guide the user's view when helpful.
 
+FAST-PATH RULES (answer without calling data/sensor tools):
+• "What am I seeing / viewing / looking at?" → call get_screen_context() or answer
+  directly from the SCREEN CONTEXT block above. Do NOT call list_assets, get_latest_readings,
+  get_sensor_statistics, or any other data tool for these questions.
+• "Where am I?" / "What module is this?" / "What is in focus?" → same as above.
+• "What did I select?" / "What range did I highlight?" → read date_range_start /
+  date_range_end from Screen Context and answer directly. Only call analyze_selected_range
+  if the user explicitly asks to analyse the data within that range.
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 OUTPUT SCHEMAS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
