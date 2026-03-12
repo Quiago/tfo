@@ -57,25 +57,34 @@ const ENERGY_DISPLAY_TO_FIELD: Record<string, Omit<EnergyNodeMapping, 'nodeId' |
 
 // ─── GRANULARITY CONFIG ───────────────────────────────────────────────────────
 //
-// windowMs  = total time span shown on X-axis (like the "timeframe" in TradingView)
-// bucketMs  = size of each aggregation bucket (0 = raw, no aggregation)
+// windowMs    = total time span shown on X-axis (like the "timeframe" in TradingView)
+// bucketMs    = size of each aggregation bucket (0 = raw, no aggregation)
+// seedMinutes = how many minutes of history to fetch from /telemetry/timeline on init
+//               or when switching to this granularity
+// maxBufferMs = in-memory buffer ceiling for this granularity
 //
 // Switching granularity changes what portion of the buffer you see and how
 // readings are averaged into buckets — exactly like 1m / 5m / 1h candles.
-// As the buffer grows (future: DB persistence), Day/Week/Year views fill in.
 
-const GRANULARITY_CONFIG: Record<TimeGranularity, { windowMs: number; bucketMs: number }> = {
-    Minute: { windowMs: 60_000,           bucketMs: 0 },          // last 60s  — raw 2s readings
-    Hour:   { windowMs: 3_600_000,        bucketMs: 30_000 },     // last 1h   — 30s buckets
-    Day:    { windowMs: 86_400_000,       bucketMs: 300_000 },    // last 24h  — 5 min buckets
-    Month:  { windowMs: 2_592_000_000,    bucketMs: 3_600_000 },  // last 30d  — 1h buckets
-    Year:   { windowMs: 31_536_000_000,   bucketMs: 86_400_000 }, // last 365d — 1d buckets
+interface GranularityConfig {
+    windowMs: number;
+    bucketMs: number;
+    seedMinutes: number;  // minutes requested from the history API
+    maxBufferMs: number;  // buffer pruning ceiling
+}
+
+const GRANULARITY_CONFIG: Record<TimeGranularity, GranularityConfig> = {
+    Minute: { windowMs: 60_000,         bucketMs: 0,          seedMinutes: 5,    maxBufferMs: 300_000    },
+    Hour:   { windowMs: 3_600_000,      bucketMs: 30_000,     seedMinutes: 65,   maxBufferMs: 3_900_000  },
+    Day:    { windowMs: 86_400_000,     bucketMs: 300_000,    seedMinutes: 1440, maxBufferMs: 90_000_000 },
+    Month:  { windowMs: 2_592_000_000,  bucketMs: 3_600_000,  seedMinutes: 1440, maxBufferMs: 90_000_000 },
+    Year:   { windowMs: 31_536_000_000, bucketMs: 86_400_000, seedMinutes: 1440, maxBufferMs: 90_000_000 },
 };
 
-// In-memory buffer ceiling: hold the Hour window + 1 min headroom.
-// Day/Month/Year views are intentionally sparse until DB-backed history pagination
-// is wired in — the buffer can only grow as fast as the 2s polling interval.
-const MAX_BUFFER_MS          = 3_660_000; // 61 min (covers Hour window with headroom)
+// API hard limit for the /telemetry/timeline endpoint (matches backend le=1440)
+const TIMELINE_API_MAX_MINUTES = 1440;
+
+const MAX_BUFFER_MS          = 3_900_000; // default ceiling used before granularity is known
 const MAX_CONSECUTIVE_ERRORS = 4;
 const NORMALIZE_WINDOW       = 60;      // readings used for rolling min/max per channel
 const RIGHT_PAD_RATIO        = 0.2;     // 20% right margin — live data sits at ~83% width (TradingView style)
@@ -313,6 +322,11 @@ export function useConnectorTimeline(
     const prevRawRef           = useRef<Partial<Record<MappedField, number>>>({});
     const prevEnergyRef        = useRef<Partial<Record<EnergyNodeMapping['field'], number>>>({});
     const bufferRef            = useRef<SensorReading[]>([]);
+    // Tracks how many minutes were last fetched so the re-seed effect only
+    // fires when switching to a granularity that needs *more* history.
+    const lastSeedMinsRef      = useRef<number>(0);
+    // Mutable ceiling used by the live polling prune — updated on granularity change.
+    const maxBufferMsRef       = useRef<number>(MAX_BUFFER_MS);
     const energyBufferRef      = useRef<EnergyReading[]>([]);
 
     useEffect(() => { bufferRef.current = sensorBuffer; }, [sensorBuffer]);
@@ -491,41 +505,44 @@ export function useConnectorTimeline(
 
             if (cancelled) return;
 
-            // ── Pre-populate sensor buffer from stored telemetry ───────────────
-            // Request enough history to fill the largest in-memory window (Hour).
-            // The API now accepts up to 1440 min; we clamp to the buffer ceiling
-            // so we never request more data than the buffer can hold.
+            // ── Pre-populate sensor + energy buffers from stored telemetry ────
+            // Use granularity-appropriate seedMinutes so Day/Month/Year views
+            // are pre-filled with the right amount of history on first connect.
             try {
-                const seedMinutes = Math.ceil(MAX_BUFFER_MS / 60_000); // ≈ 62 min
-                const history = await getTelemetryTimeline(seedMinutes);
+                const cfg = GRANULARITY_CONFIG[granularity];
+                const seedMins = Math.min(cfg.seedMinutes, TIMELINE_API_MAX_MINUTES);
+                const history = await getTelemetryTimeline(seedMins);
                 if (!cancelled && history.length > 0) {
-                    const seeded: SensorReading[] = history.map((p) => ({
-                        timestamp:      p.timestamp,
-                        temperature:    p.temperature,
-                        vibration:      p.vibration,
-                        pressure:       p.pressure,
-                        humidity:       p.humidity,
-                        rawTemperature: p.rawTemperature ?? null,
-                        rawVibration:   p.rawVibration   ?? null,
-                        rawPressure:    p.rawPressure    ?? null,
-                        rawHumidity:    p.rawHumidity    ?? null,
-                        anomaly:        false,
-                        alertLevel:     'none' as const,
-                    }));
-                    const cutoff = Date.now() - MAX_BUFFER_MS;
-                    const kept = pruneBuffer(seeded, cutoff);
-                    setSensorBuffer(kept);
-                    bufferRef.current = kept;
+                    const cutoff = Date.now() - cfg.maxBufferMs;
+                    const seeded: SensorReading[] = pruneBuffer(
+                        history.map((p) => ({
+                            timestamp:      p.timestamp,
+                            temperature:    p.temperature,
+                            vibration:      p.vibration,
+                            pressure:       p.pressure,
+                            humidity:       p.humidity,
+                            rawTemperature: p.rawTemperature ?? null,
+                            rawVibration:   p.rawVibration   ?? null,
+                            rawPressure:    p.rawPressure    ?? null,
+                            rawHumidity:    p.rawHumidity    ?? null,
+                            anomaly:        false,
+                            alertLevel:     'none' as const,
+                        })),
+                        cutoff,
+                    );
+                    setSensorBuffer(seeded);
+                    bufferRef.current = seeded;
 
                     // Seed energy buffer from the same history so the Energy chart
-                    // is populated immediately. When real OPC UA energy readings
-                    // arrive they append on top — the derived seed just fills the
-                    // left portion until live data takes over.
-                    const seededEnergy = kept.map(deriveEnergy);
+                    // is populated immediately. Real OPC UA energy readings append
+                    // on top as they arrive from the live polling loop.
+                    const seededEnergy = seeded.map(deriveEnergy);
                     setEnergyBuffer(seededEnergy);
                     energyBufferRef.current = seededEnergy;
 
-                    console.log('[Connector] Seeded buffer:', kept.length, 'readings from last', seedMinutes, 'min');
+                    maxBufferMsRef.current = cfg.maxBufferMs;
+                    lastSeedMinsRef.current = seedMins;
+                    console.log('[Connector] Seeded buffer:', seeded.length, 'readings from last', seedMins, 'min');
                 }
             } catch (err) {
                 console.warn('[Connector] Telemetry seed failed (non-fatal):', err);
@@ -634,7 +651,7 @@ export function useConnectorTimeline(
             };
 
             setSensorBuffer((prev) => {
-                const cutoff = reading.timestamp - MAX_BUFFER_MS;
+                const cutoff = reading.timestamp - maxBufferMsRef.current;
                 return [...pruneBuffer(prev, cutoff), reading];
             });
 
@@ -655,7 +672,7 @@ export function useConnectorTimeline(
                 };
 
                 setEnergyBuffer((prev) => {
-                    const cutoff = energyReading.timestamp - MAX_BUFFER_MS;
+                    const cutoff = energyReading.timestamp - maxBufferMsRef.current;
                     return [...pruneBuffer(prev, cutoff), energyReading];
                 });
             }
@@ -663,6 +680,69 @@ export function useConnectorTimeline(
 
         return () => clearInterval(interval);
     }, [connectorId, status]);
+
+    // ── Re-seed when switching to a larger granularity ────────────────────────
+    //
+    // When the user switches from e.g. Hour → Day, the live buffer only holds
+    // ~65 min of data. This effect fetches the additional history from the API
+    // (up to 1440 min / 24 h) so the larger window has data immediately.
+    // It is a no-op when the new granularity needs no more data than what was
+    // already seeded (tracked by lastSeedMinsRef).
+    useEffect(() => {
+        if (status !== 'connected' || !connectorId) return;
+
+        const { seedMinutes, maxBufferMs } = GRANULARITY_CONFIG[granularity];
+        const needed = Math.min(seedMinutes, TIMELINE_API_MAX_MINUTES);
+
+        // Already have enough history for this granularity
+        if (needed <= lastSeedMinsRef.current) {
+            maxBufferMsRef.current = maxBufferMs;
+            return;
+        }
+
+        maxBufferMsRef.current = maxBufferMs;
+        lastSeedMinsRef.current = needed;
+
+        getTelemetryTimeline(needed)
+            .then((history) => {
+                if (!history.length) return;
+                const cutoff = Date.now() - maxBufferMs;
+                const seeded: SensorReading[] = pruneBuffer(
+                    history.map((p) => ({
+                        timestamp:      p.timestamp,
+                        temperature:    p.temperature,
+                        vibration:      p.vibration,
+                        pressure:       p.pressure,
+                        humidity:       p.humidity,
+                        rawTemperature: p.rawTemperature ?? null,
+                        rawVibration:   p.rawVibration   ?? null,
+                        rawPressure:    p.rawPressure    ?? null,
+                        rawHumidity:    p.rawHumidity    ?? null,
+                        anomaly:        false,
+                        alertLevel:     'none' as const,
+                    })),
+                    cutoff,
+                );
+
+                setSensorBuffer((prev) => {
+                    // Historical seed fills the left side; existing live readings
+                    // (prev) take priority for any overlapping timestamps.
+                    const liveTs = new Set(prev.map((r) => r.timestamp));
+                    const older  = seeded.filter((r) => !liveTs.has(r.timestamp));
+                    return [...older, ...prev].sort((a, b) => a.timestamp - b.timestamp);
+                });
+
+                setEnergyBuffer((prev) => {
+                    const seededEnergy = seeded.map(deriveEnergy);
+                    const liveTs = new Set(prev.map((r) => r.timestamp));
+                    const older  = seededEnergy.filter((r) => !liveTs.has(r.timestamp));
+                    return [...older, ...prev].sort((a, b) => a.timestamp - b.timestamp);
+                });
+
+                console.log('[Connector] Re-seeded for', granularity, '—', seeded.length, 'readings');
+            })
+            .catch(() => { /* non-fatal: chart shows what it has */ });
+    }, [connectorId, granularity, status]);
 
     // ── Manual anomaly injection (TEST ANOMALY button) ────────────────────────
     const triggerAnomaly = useCallback(() => {
