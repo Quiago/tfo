@@ -1023,11 +1023,9 @@ export function MultiLayerTimeline({ autoTriggerAnomaly, onAnomalyTriggered, con
     }, [screenCtx]);
 
     const toggleRangeMode = useCallback(() => {
-        setIsRangeMode((prev) => {
-            if (prev) clearRange(); // exiting range mode → clear selection
-            return !prev;
-        });
-    }, [clearRange]);
+        if (isRangeMode) clearRange(); // exiting range mode → clear selection
+        setIsRangeMode((prev) => !prev);
+    }, [isRangeMode, clearRange]);
 
     const rangeConfig: RangeConfig = useMemo(() => ({
         displayRange,
