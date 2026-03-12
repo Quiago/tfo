@@ -571,6 +571,9 @@ def backfill_missing_history(
         if not last_at:
             start_dt = now - timedelta(hours=RETENTION_HOURS)
         else:
+            # SQLite returns naive datetimes; attach UTC so arithmetic works
+            if last_at.tzinfo is None:
+                last_at = last_at.replace(tzinfo=UTC)
             start_dt = last_at + timedelta(seconds=POLL_INTERVAL)
 
         gap_seconds = (now - start_dt).total_seconds()
