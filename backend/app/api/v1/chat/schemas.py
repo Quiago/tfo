@@ -33,11 +33,23 @@ class ConversationResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ScreenContextSnapshot(BaseModel):
+    """Minimal screen context forwarded from the frontend on every chat turn."""
+    active_module: str = "overview"
+    selected_team_name: str | None = None
+    active_connector_id: str | None = None
+    granularity: str | None = None
+    date_range_start: int | None = None   # epoch ms
+    date_range_end: int | None = None
+    summary: str = ""
+
+
 class MessageCreate(BaseModel):
     content: str
     stream: bool = False
     max_new_tokens: int = 2048
     temperature: float = 0.7
+    screen_context: ScreenContextSnapshot | None = None
 
 
 class MessageResponse(BaseModel):

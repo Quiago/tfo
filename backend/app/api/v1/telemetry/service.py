@@ -377,6 +377,63 @@ def get_statistics(
     ]
 
 
+def get_statistics_absolute(
+    session: Session,
+    signal_ids: list[str],
+    start_ms: int,
+    end_ms: int,
+    connector_id: str | None = None,
+) -> list[dict]:
+    """Aggregated stats for specific absolute epoch-ms timestamps.
+
+    Unlike get_statistics (which uses NOW-N minutes), this queries the exact
+    user-drawn range so the results match what the user sees on the Timeline.
+    If signal_ids is empty, stats are returned for all signals active in the range.
+    """
+    start_dt = datetime.fromtimestamp(start_ms / 1000, UTC)
+    end_dt   = datetime.fromtimestamp(end_ms   / 1000, UTC)
+
+    base_filter = [
+        TelemetryReading.recorded_at >= start_dt,
+        TelemetryReading.recorded_at <= end_dt,
+    ]
+    if signal_ids:
+        base_filter.append(col(TelemetryReading.signal_id).in_(signal_ids))
+    if connector_id:
+        base_filter.append(TelemetryReading.connector_id == connector_id)
+
+    stmt = (
+        select(
+            TelemetryReading.signal_id,
+            TelemetryReading.display_name,
+            TelemetryReading.unit,
+            func.count(TelemetryReading.id).label("cnt"),
+            func.min(TelemetryReading.value).label("min_v"),
+            func.max(TelemetryReading.value).label("max_v"),
+            func.avg(TelemetryReading.value).label("avg_v"),
+        )
+        .where(*base_filter)
+        .group_by(
+            TelemetryReading.signal_id,
+            TelemetryReading.display_name,
+            TelemetryReading.unit,
+        )
+    )
+    rows = session.exec(stmt).all()
+    return [
+        {
+            "signal_id":    r.signal_id,
+            "display_name": r.display_name,
+            "unit":         r.unit,
+            "count":        r.cnt,
+            "min":          round(r.min_v, 3),
+            "max":          round(r.max_v, 3),
+            "avg":          round(r.avg_v, 3),
+        }
+        for r in rows
+    ]
+
+
 def get_timeline_history(
     session: Session,
     minutes: int = 10,

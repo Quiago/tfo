@@ -3,6 +3,7 @@
 import { apiFetch, ApiError, BASE_URL } from '@/lib/services/backend';
 import { getStoredToken } from '@/lib/store/auth-store';
 import type { Conversation, ChatMessage, StreamEvent, MemoryEntry } from '@/lib/types/chat';
+import type { AgentScreenContext } from '@/lib/services/agent.service';
 
 // ─── CONVERSATIONS ────────────────────────────────────────────────────────────
 
@@ -34,7 +35,7 @@ export async function getMessages(conversationId: string): Promise<ChatMessage[]
 export async function* streamMessage(
     conversationId: string,
     content: string,
-    options: { max_new_tokens?: number; temperature?: number } = {},
+    options: { max_new_tokens?: number; temperature?: number; screen_context?: AgentScreenContext } = {},
     signal?: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
     const token = getStoredToken();

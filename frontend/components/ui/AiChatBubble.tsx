@@ -478,7 +478,7 @@ export function AiChatBubble() {
             // ── Chat mode ─────────────────────────────────────────────────────
             let finalMessageId: string | null = null
 
-            for await (const event of streamMessage(convId, content, {}, abort.signal)) {
+            for await (const event of streamMessage(convId, content, { screen_context: serialiseScreenContext(screenCtx) }, abort.signal)) {
                 if (abort.signal.aborted) break
 
                 switch (event.type) {

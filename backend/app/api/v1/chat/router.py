@@ -77,6 +77,7 @@ async def send_message(conversation_id: str, body: MessageCreate, session: Sessi
             max_new_tokens=body.max_new_tokens,
             temperature=body.temperature,
             session=session,
+            screen_context=body.screen_context,
         )
         return StreamingResponse(
             _sse_generator(event_gen),
@@ -90,6 +91,7 @@ async def send_message(conversation_id: str, body: MessageCreate, session: Sessi
         max_new_tokens=body.max_new_tokens,
         temperature=body.temperature,
         session=session,
+        screen_context=body.screen_context,
     )
     return MessageResponse.model_validate(msg)
 

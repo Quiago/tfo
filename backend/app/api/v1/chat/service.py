@@ -129,7 +129,7 @@ def list_messages(conversation_id: str, user_id: int, session: Session) -> list[
     )
 
 
-async def send_message(conversation_id: str, user_id: int, content: str, max_new_tokens: int, temperature: float, session: Session) -> Message:
+async def send_message(conversation_id: str, user_id: int, content: str, max_new_tokens: int, temperature: float, session: Session, screen_context=None) -> Message:
     if not engine.is_ready:
         raise ModelNotReady
 
@@ -142,7 +142,7 @@ async def send_message(conversation_id: str, user_id: int, content: str, max_new
 
     messages = list_messages(conversation_id, user_id, session)
     model_config = get_model_config(conv.model_id)
-    context = build_context(conv, messages, memories, model_config=model_config, kb_documents=kb_docs)
+    context = build_context(conv, messages, memories, model_config=model_config, kb_documents=kb_docs, screen_context=screen_context)
 
     final_text, tool_calls_log = await _run_tool_loop(context, max_new_tokens, temperature, session, model_config)
     final_text, _ = _extract_thinking(final_text)  # strip think block before saving
@@ -152,7 +152,7 @@ async def send_message(conversation_id: str, user_id: int, content: str, max_new
     return assistant_msg
 
 
-async def send_message_streaming(conversation_id: str, user_id: int, content: str, max_new_tokens: int, temperature: float, session: Session) -> AsyncGenerator[dict, None]:
+async def send_message_streaming(conversation_id: str, user_id: int, content: str, max_new_tokens: int, temperature: float, session: Session, screen_context=None) -> AsyncGenerator[dict, None]:
     logger.info(
         "stream_start — conv=%s user=%s model_ready=%s model=%s",
         conversation_id, user_id, engine.is_ready, engine.current_model_id,
@@ -176,7 +176,7 @@ async def send_message_streaming(conversation_id: str, user_id: int, content: st
 
     messages = list_messages(conversation_id, user_id, session)
     model_config = get_model_config(conv.model_id)
-    context = build_context(conv, messages, memories, model_config=model_config, kb_documents=kb_docs)
+    context = build_context(conv, messages, memories, model_config=model_config, kb_documents=kb_docs, screen_context=screen_context)
     tools = OPENAI_TOOL_SCHEMAS if model_config.supports_native_tools else None
 
     tool_calls_log: list[dict] = []

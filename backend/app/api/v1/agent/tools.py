@@ -137,9 +137,33 @@ async def _analyze_selected_range(
                      "Ask the user to drag-select a range on the timeline chart first, "
                      "then try again."
         })
-    minutes = max(1, int((end_ms - start_ms) / 60_000))
-    logger.info("agent_tool — analyze_selected_range minutes=%d", minutes)
-    return await execute_chat_tool("query_time_range", {"minutes": minutes}, session)
+    from datetime import datetime, UTC as _UTC
+    from app.api.v1.telemetry.service import get_statistics_absolute
+    fmt = lambda ms: datetime.fromtimestamp(ms / 1000, _UTC).strftime("%b %d %H:%M UTC")
+    logger.info(
+        "agent_tool — analyze_selected_range start=%s end=%s",
+        fmt(start_ms), fmt(end_ms),
+    )
+    # signal_ids=[] → returns stats for ALL signals active in the range
+    stats = get_statistics_absolute(
+        session,
+        signal_ids=[],
+        start_ms=start_ms,
+        end_ms=end_ms,
+        connector_id=screen_context.active_connector_id,
+    )
+    if not stats:
+        return json.dumps({
+            "range_start": fmt(start_ms),
+            "range_end": fmt(end_ms),
+            "error": "No telemetry readings found in the selected time range.",
+        })
+    return json.dumps({
+        "range_start": fmt(start_ms),
+        "range_end": fmt(end_ms),
+        "duration_minutes": round((end_ms - start_ms) / 60_000, 1),
+        "stats": stats,
+    })
 
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────

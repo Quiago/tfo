@@ -1,6 +1,8 @@
 """
 chat/context.py — Construcción de contexto para inferencia LLM.
 """
+from __future__ import annotations
+
 import json
 import re
 
@@ -117,6 +119,7 @@ def build_context(
     model_config: ModelConfig = None,
     asset_catalog: list[dict] = None,
     kb_documents: list[dict] | None = None,
+    screen_context: "ScreenContextSnapshot | None" = None,
 ) -> list[dict]:
     """
     Construye la lista de mensajes en formato OpenAI para el engine.
@@ -147,6 +150,28 @@ def build_context(
             for d in kb_documents
         ]
         system_parts.append(_KB_DOCUMENTS.format(doc_list="\n".join(doc_lines)))
+
+    if screen_context:
+        lines = [f"Module       : {screen_context.active_module}"]
+        if screen_context.selected_team_name:
+            lines.append(f"Asset focus  : {screen_context.selected_team_name}")
+        if screen_context.active_connector_id:
+            lines.append(f"Connector    : {screen_context.active_connector_id}  (granularity: {screen_context.granularity})")
+        if screen_context.date_range_start and screen_context.date_range_end:
+            from datetime import datetime, UTC
+            fmt = lambda ms: datetime.fromtimestamp(ms / 1000, UTC).strftime("%b %d %H:%M")
+            lines.append(
+                f"Selected range: {fmt(screen_context.date_range_start)} → {fmt(screen_context.date_range_end)}"
+            )
+        if screen_context.summary:
+            lines.append(f"Summary      : {screen_context.summary}")
+        ctx_block = "\n".join(lines)
+        system_parts.append(
+            "\n## SCREEN CONTEXT — what the user is currently viewing\n"
+            f"{ctx_block}\n"
+            "When the user refers to 'the selected range', 'this period', or 'what I highlighted' → "
+            "use the selected range timestamps above with query_time_range or get_sensor_statistics."
+        )
 
     if memories:
         mem_text = "\n## Long-term Context\n" + "\n".join(f"- {m.content}" for m in memories)
