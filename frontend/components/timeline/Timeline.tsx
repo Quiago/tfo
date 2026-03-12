@@ -73,15 +73,24 @@ const categoryToY: Record<string, number> = {
 };
 
 // ─── FORMAT UTILS ───────────────────────────────────────────────────────────
+//
+// X-axis label resolution matches the visible window so each tick is always
+// meaningful at that zoom level:
+//
+//   Minute  (last  60 s)  → HH:MM:SS  — 2-5 s between data points
+//   Hour    (last   1 h)  → HH:MM     — 30 s buckets; minutes are the natural unit
+//   Day     (last  24 h)  → HH:MM     — 5 min buckets; show time-of-day, not date
+//   Month   (last  30 d)  → MMM DD    — 1 h buckets; day-of-month is the right label
+//   Year    (last 365 d)  → MMM 'YY   — 1 d buckets; month+year labels
 function formatTimestamp(ts: number, granularity: TimeGranularity): string {
     const d = new Date(ts);
     switch (granularity) {
         case 'Minute':
-            return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         case 'Hour':
             return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         case 'Day':
-            return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+            return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         case 'Month':
             return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
         case 'Year':
