@@ -7,12 +7,18 @@ set -a
 source /workspace/.env
 set +a
 
-# uv en PATH
 export PATH="/root/.local/bin:$PATH"
 
-BACKEND_DIR="/workspace/tfo/backend"
+REPO_DIR="/workspace/tfo"
+BACKEND_DIR="$REPO_DIR/backend"
 LOG_DIR="/workspace/logs"
 mkdir -p "$LOG_DIR"
+
+# ── Git pull ──────────────────────────────────────────────────────────────────
+echo "[start] Actualizando código..."
+cd "$REPO_DIR"
+git pull
+echo "[start] Código actualizado ✅"
 
 cd "$BACKEND_DIR"
 
@@ -28,9 +34,7 @@ echo "[start] Sincronizando dependencias..."
 UV_CACHE_DIR=/workspace/.uv-cache uv sync --frozen --no-dev --python 3.12
 
 # ── Matar procesos anteriores ─────────────────────────────────────────────────
-pkill -f "simulated-data/main.py" 2>/dev/null
-pkill -f "uvicorn app.main" 2>/dev/null
-sleep 2
+bash "$BACKEND_DIR/stop.sh"
 
 # ── 1. Simulador OPC-UA (4840) + REST (8003) ─────────────────────────────────
 echo "[start] Arrancando simulador..."
