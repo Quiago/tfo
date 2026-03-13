@@ -51,6 +51,8 @@ import re
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import Integer as SAInteger
+from sqlalchemy import cast as sa_cast
 from sqlmodel import Session, col, delete as sql_delete, func, select
 
 from app.api.v1.connectors.backends.base import NodeInfo
@@ -91,6 +93,34 @@ def _backfill_step(age_seconds: float) -> int:
         if age_seconds >= min_age:
             return step
     return POLL_INTERVAL
+
+
+# ── Timeline downsampling tiers ───────────────────────────────────────────────
+# When the frontend requests a large history window the DB must aggregate
+# (GROUP BY time bucket) before sending data — otherwise /telemetry/timeline
+# would try to return hundreds of thousands of raw rows.
+#
+# Each entry: (min_minutes_threshold, bucket_seconds)
+# Matches the frontend GRANULARITY_CONFIG bucketMs values:
+#   Year  (>30d) → 1-day buckets    (86 400 s)  → ~365 points
+#   Month (>1d)  → 1-hour buckets   (3 600 s)   → ~720 points / 30d
+#   Day   (>1h)  → 5-min buckets    (300 s)      → ~288 points / 24h
+#   Hour/Minute  → raw (bucket_seconds = 0)
+_DOWNSAMPLE_TIERS: list[tuple[int, int]] = [
+    (43_200, 86_400),  # > 30 days  → 1-day   buckets
+    (1_440,   3_600),  # > 24 hours → 1-hour  buckets
+    (60,       300),   # > 1 hour   → 5-min   buckets
+    (0,          0),   # ≤ 1 hour   → raw
+]
+
+
+def _downsample_bucket_seconds(minutes: int) -> int:
+    """Return DB bucket size in seconds for the requested time window."""
+    for min_minutes, bucket_s in _DOWNSAMPLE_TIERS:
+        if minutes > min_minutes:
+            return bucket_s
+    return 0
+
 
 # Virtual connector_id stored in DB rows when reading via OPC UA connector.
 # Matches whatever connector_id the user configured.  Stored per-reading so
@@ -505,25 +535,60 @@ def get_timeline_history(
     """
     Pre-computed 4-channel timeline for the frontend chart.
 
-    Reads the last `minutes` of raw data for temperature / vibration /
-    pressure / humidity signals, buckets readings by poll cycle, then
-    normalises each channel to 0–100 using the window min/max — identical
-    normalisation to what the frontend hook applies to live readings.
+    For small windows (≤ 1h) returns raw poll-cycle buckets.
+    For larger windows the query uses DB-level GROUP BY aggregation so the
+    response is always ≤ ~800 points regardless of the requested window:
+      > 30 days  → 1-day   buckets  (~365 points / year)
+      > 24 hours → 1-hour  buckets  (~720 points / 30 days)
+      > 1 hour   → 5-min   buckets  (~288 points / 24 hours)
+      ≤ 1 hour   → raw POLL_INTERVAL buckets
+
+    Each point is normalised to 0–100 relative to the window min/max so
+    the shape is identical to what the live frontend hook produces.
     """
     signal_ids = list(TIMELINE_FIELD_MAP.values())
-    readings = query_time_range(session, signal_ids, minutes, connector_id)
+    cutoff     = datetime.now(UTC) - timedelta(minutes=minutes)
+    bucket_s   = _downsample_bucket_seconds(minutes)
 
-    bucket_ms = POLL_INTERVAL * 1000
+    # ── Build time-bucketed (signal_id → avg_value) map ──────────────────────
     buckets: dict[int, dict[str, float]] = defaultdict(dict)
-    for r in readings:
-        ts_ms = int(r.recorded_at.timestamp() * 1000)
-        key = (ts_ms // bucket_ms) * bucket_ms
-        buckets[key][r.signal_id] = r.value
 
+    if bucket_s == 0:
+        # Raw mode — existing behaviour, good for Minute / Hour views
+        readings = query_time_range(session, signal_ids, minutes, connector_id)
+        raw_bucket_ms = POLL_INTERVAL * 1000
+        for r in readings:
+            ts_ms = int(r.recorded_at.timestamp() * 1000)
+            key   = (ts_ms // raw_bucket_ms) * raw_bucket_ms
+            buckets[key][r.signal_id] = r.value
+    else:
+        # DB-level downsampling — aggregate before sending to Python
+        # SQLite: CAST(strftime('%s', recorded_at) AS INTEGER) → Unix seconds
+        epoch      = sa_cast(func.strftime('%s', TelemetryReading.recorded_at), SAInteger)
+        bucket_key = (epoch / bucket_s) * bucket_s   # integer division in SQLite
+
+        stmt = (
+            select(
+                bucket_key.label("ts_epoch"),
+                TelemetryReading.signal_id,
+                func.avg(TelemetryReading.value).label("avg_val"),
+            )
+            .where(col(TelemetryReading.signal_id).in_(signal_ids))
+            .where(TelemetryReading.recorded_at >= cutoff)
+        )
+        if connector_id:
+            stmt = stmt.where(TelemetryReading.connector_id == connector_id)
+        stmt = stmt.group_by(bucket_key, TelemetryReading.signal_id).order_by(bucket_key)
+
+        for row in session.execute(stmt).all():
+            ts_ms = int(row.ts_epoch) * 1_000
+            buckets[ts_ms][row.signal_id] = float(row.avg_val)
+
+    # ── Normalise 0–100 across the full window ────────────────────────────────
     field_vals: dict[str, list[float]] = {f: [] for f in TIMELINE_FIELD_MAP}
-    for bucket in buckets.values():
+    for bkt in buckets.values():
         for field, sig_id in TIMELINE_FIELD_MAP.items():
-            v = bucket.get(sig_id)
+            v = bkt.get(sig_id)
             if v is not None:
                 field_vals[field].append(v)
 
@@ -536,22 +601,15 @@ def get_timeline_history(
             return 50.0
         return round(((v - mn) / spread) * 100, 2)
 
-    # Lookup: signal_id → human label + unit (from the first reading found)
-    sig_meta: dict[str, tuple[str, str]] = {}
-    for r in readings:
-        if r.signal_id not in sig_meta:
-            sig_meta[r.signal_id] = (r.display_name, r.unit)
-
     result = []
     for ts_ms in sorted(buckets.keys()):
-        bucket = buckets[ts_ms]
+        bkt   = buckets[ts_ms]
         point: dict = {"timestamp": ts_ms}
         for field, sig_id in TIMELINE_FIELD_MAP.items():
-            v = bucket.get(sig_id)
+            v = bkt.get(sig_id)
             if v is None:
                 break
             point[field] = _norm(v, field_vals[field])
-            # Store raw engineering-unit value under camelCase key for tooltip
             raw_key = "raw" + field[0].upper() + field[1:]
             point[raw_key] = round(v, 4)
         else:

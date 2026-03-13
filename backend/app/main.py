@@ -36,13 +36,19 @@ async def lifespan(app: FastAPI):
     setup_logging()
     create_db_and_tables()
 
-    # Backfill any gap since last shutdown before the live poller starts
     _sf = lambda: SQLModelSession(db_engine)
-    backfill_missing_history(session_factory=_sf)
 
-    # Start telemetry poller (polls OPC UA connector every 5s, stores in DB)
+    # Start telemetry poller immediately — don't wait for backfill
     poller = TelemetryPoller(session_factory=_sf)
     poller.start()
+
+    # Run backfill in a background thread so it never blocks startup or requests.
+    # backfill_missing_history() is a long-running sync function (~794k inserts
+    # on first boot); running it via asyncio.to_thread keeps the event loop free.
+    asyncio.create_task(
+        asyncio.to_thread(backfill_missing_history, _sf),
+        name="telemetry-backfill",
+    )
 
     async def _startup():
         # 1. Download + load priority model into RAM.
