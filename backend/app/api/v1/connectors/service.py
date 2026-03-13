@@ -139,6 +139,14 @@ async def discover(connector_id: str, session: Session, force: bool = False) -> 
         result = await backend.discover()
     except NotImplementedError:
         raise BackendNotImplemented
+    except (ConnectionRefusedError, OSError) as exc:
+        # Transient: simulator / device not reachable yet — log quietly so
+        # the dev console isn't flooded with stack traces every 5 s.
+        logger.debug(
+            "discovery_error",
+            extra={"connector_id": connector_id, "error": str(exc)},
+        )
+        raise ConnectorReadError
     except Exception as exc:
         logger.warning(
             "discovery_error",
