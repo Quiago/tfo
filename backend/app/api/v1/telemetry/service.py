@@ -53,6 +53,8 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import Integer as SAInteger
 from sqlalchemy import cast as sa_cast
+from sqlalchemy import literal_column
+from sqlalchemy import text as sa_text
 from sqlmodel import Session, col, delete as sql_delete, func, select
 
 from app.api.v1.connectors.backends.base import NodeInfo
@@ -562,14 +564,22 @@ def get_timeline_history(
             key   = (ts_ms // raw_bucket_ms) * raw_bucket_ms
             buckets[key][r.signal_id] = r.value
     else:
-        # DB-level downsampling — aggregate before sending to Python
-        # SQLite: CAST(strftime('%s', recorded_at) AS INTEGER) → Unix seconds
-        epoch      = sa_cast(func.strftime('%s', TelemetryReading.recorded_at), SAInteger)
-        bucket_key = (epoch / bucket_s) * bucket_s   # integer division in SQLite
+        # DB-level downsampling — GROUP BY time bucket before sending to Python.
+        #
+        # Use literal_column / sa_text with an f-string so SELECT, GROUP BY, and
+        # ORDER BY all emit the exact same SQL fragment.  SQLAlchemy would render
+        # the ORM expression differently in each clause, causing SQLite to treat
+        # them as distinct columns and skip aggregation entirely.
+        #
+        # bucket_s comes from the internal _DOWNSAMPLE_TIERS table — never from
+        # user input — so f-string interpolation is safe here.
+        bucket_expr = (
+            f"(CAST(strftime('%s', recorded_at) AS INTEGER) / {bucket_s}) * {bucket_s}"
+        )
 
         stmt = (
             select(
-                bucket_key.label("ts_epoch"),
+                literal_column(bucket_expr).label("ts_epoch"),
                 TelemetryReading.signal_id,
                 func.avg(TelemetryReading.value).label("avg_val"),
             )
@@ -578,7 +588,11 @@ def get_timeline_history(
         )
         if connector_id:
             stmt = stmt.where(TelemetryReading.connector_id == connector_id)
-        stmt = stmt.group_by(bucket_key, TelemetryReading.signal_id).order_by(bucket_key)
+        stmt = (
+            stmt
+            .group_by(sa_text(bucket_expr), TelemetryReading.signal_id)
+            .order_by(sa_text(bucket_expr))
+        )
 
         for row in session.execute(stmt).all():
             ts_ms = int(row.ts_epoch) * 1_000
@@ -651,30 +665,50 @@ def backfill_missing_history(
     one_year_ago = now - timedelta(hours=RETENTION_HOURS)
 
     with session_factory() as session:
-        # 1. Check whether historical data (older than 1 h) already exists.
-        #    If it does, the full backfill was already run; just fill the recent gap.
-        #    If it doesn't, fill the entire retention window from 1 year ago.
-        has_history: bool = session.exec(
-            select(TelemetryReading.id)
-            .where(TelemetryReading.recorded_at >= one_year_ago)
-            .where(TelemetryReading.recorded_at <  one_hour_ago)
-            .limit(1)
-        ).first() is not None
+        # 1. Decide start point by inspecting the OLDEST row in the DB.
+        #
+        #    Full backfill is needed when the DB is empty OR when the oldest
+        #    stored row is NOT close to the retention boundary — meaning the
+        #    server has only been running for a short time (hours / days) and
+        #    Month / Year views would be mostly empty.
+        #
+        #    "Close to boundary" = oldest row is at least (RETENTION_HOURS − 48h)
+        #    old, i.e. within 2 days of the 1-year mark.  This avoids re-running
+        #    the expensive full backfill every time the server restarts after the
+        #    initial fill.
+        oldest_at: datetime | None = session.exec(
+            select(func.min(TelemetryReading.recorded_at))
+        ).first()
 
-        if has_history:
-            # Partial fill: start just after the last stored reading
-            last_at: datetime | None = session.exec(
-                select(func.max(TelemetryReading.recorded_at))
-            ).first()
-            if last_at is None:
-                start_dt = one_hour_ago
-            else:
-                if last_at.tzinfo is None:
-                    last_at = last_at.replace(tzinfo=UTC)
-                start_dt = last_at + timedelta(seconds=POLL_INTERVAL)
-        else:
-            # Full backfill: generate data for the entire retention window
+        if oldest_at is None:
+            # Empty DB — full year backfill
             start_dt = one_year_ago
+        else:
+            if oldest_at.tzinfo is None:
+                oldest_at = oldest_at.replace(tzinfo=UTC)
+            age_of_oldest = (now - oldest_at).total_seconds()
+            full_retention_s = (RETENTION_HOURS - 48) * 3_600  # 2-day tolerance
+
+            if age_of_oldest >= full_retention_s:
+                # Full backfill already done — only fill the gap since last shutdown
+                last_at: datetime | None = session.exec(
+                    select(func.max(TelemetryReading.recorded_at))
+                ).first()
+                if last_at is None:
+                    start_dt = one_year_ago
+                else:
+                    if last_at.tzinfo is None:
+                        last_at = last_at.replace(tzinfo=UTC)
+                    start_dt = last_at + timedelta(seconds=POLL_INTERVAL)
+            else:
+                # DB only has recent data (hours / days) — full year backfill needed
+                logger.info(
+                    "[Telemetry] backfill — oldest data is %.1f h old (threshold %.0f h); "
+                    "running full-year backfill",
+                    age_of_oldest / 3_600,
+                    full_retention_s / 3_600,
+                )
+                start_dt = one_year_ago
 
         gap_seconds = (now - start_dt).total_seconds()
 
