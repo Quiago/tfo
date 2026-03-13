@@ -74,15 +74,15 @@ interface GranularityConfig {
 }
 
 const GRANULARITY_CONFIG: Record<TimeGranularity, GranularityConfig> = {
-    Minute: { windowMs: 60_000,         bucketMs: 0,          seedMinutes: 5,    maxBufferMs: 300_000    },
-    Hour:   { windowMs: 3_600_000,      bucketMs: 30_000,     seedMinutes: 65,   maxBufferMs: 3_900_000  },
-    Day:    { windowMs: 86_400_000,     bucketMs: 300_000,    seedMinutes: 1440, maxBufferMs: 90_000_000 },
-    Month:  { windowMs: 2_592_000_000,  bucketMs: 3_600_000,  seedMinutes: 1440, maxBufferMs: 90_000_000 },
-    Year:   { windowMs: 31_536_000_000, bucketMs: 86_400_000, seedMinutes: 1440, maxBufferMs: 90_000_000 },
+    Minute: { windowMs: 60_000,         bucketMs: 0,          seedMinutes: 1,      maxBufferMs: 300_000       },
+    Hour:   { windowMs: 3_600_000,      bucketMs: 30_000,     seedMinutes: 60,     maxBufferMs: 3_900_000     },
+    Day:    { windowMs: 86_400_000,     bucketMs: 300_000,    seedMinutes: 1440,   maxBufferMs: 90_000_000    },
+    Month:  { windowMs: 2_592_000_000,  bucketMs: 3_600_000,  seedMinutes: 43_200, maxBufferMs: 2_700_000_000 },
+    Year:   { windowMs: 31_536_000_000, bucketMs: 86_400_000, seedMinutes: 525_600,maxBufferMs: 32_000_000_000},
 };
 
-// API hard limit for the /telemetry/timeline endpoint (matches backend le=1440)
-const TIMELINE_API_MAX_MINUTES = 1440;
+// API hard limit for the /telemetry/timeline endpoint (matches backend le=525_600)
+const TIMELINE_API_MAX_MINUTES = 525_600;
 
 const MAX_BUFFER_MS          = 3_900_000; // default ceiling used before granularity is known
 const MAX_CONSECUTIVE_ERRORS = 4;
@@ -788,22 +788,19 @@ export function useConnectorTimeline(
             ? aggregateEnergyBuckets(energyBuffer, bucketMs, fullLeft)
             : vis.map(deriveEnergy);
 
-        // ── TradingView-style adaptive sliding window ─────────────────────────
+        // ── Fixed sliding window (TradingView-style) ─────────────────────────
         //
-        // domainLeft = max(oldest bucket timestamp, now - windowMs)
-        //   ∙ When buffer covers the full window → standard left edge (now - windowMs)
-        //   ∙ When data is sparse (Day/Month/Year on a fresh session) → left edge
-        //     anchors to oldest available data so it fills left-to-right, not
-        //     compressed into a right-side sliver
+        // domainLeft is always exactly "now - windowMs" regardless of how much
+        // data is in the buffer. This guarantees that the Year view always shows
+        // a 12-month axis, the Month view a 30-day axis, etc. — the chart fills
+        // left-to-right as backfilled + live data arrives, never compresses.
         //
         // domainRight = now + visibleSpan * RIGHT_PAD_RATIO
         //   ∙ Live data always lands at ~83% of chart width
-        //   ∙ Right margin grows proportionally during warm-up, then stabilises
-        //   ∙ Bucket midpoint overshoot (up to bucketMs/2 past now) stays within
-        //     the padding zone and never causes out-of-range rendering
-        const firstTs     = vis.length > 0 ? vis[0].timestamp : now;
-        const domainLeft  = Math.max(firstTs, now - windowMs);
-        const visibleSpan = Math.max(now - domainLeft, bucketMs > 0 ? bucketMs : 5_000);
+        //   ∙ Right padding is proportional so the gap stays consistent across
+        //     all granularities (bucketMs/2 overshoot stays in the padding zone)
+        const domainLeft  = now - windowMs;
+        const visibleSpan = Math.max(windowMs, bucketMs > 0 ? bucketMs : 5_000);
         const domainRight = now + Math.round(visibleSpan * RIGHT_PAD_RATIO);
 
         return {

@@ -146,7 +146,7 @@ def history(
         str,
         Query(description="Comma-separated signal IDs (see /api/nodes)"),
     ] = "zone1_temperature,total_power,throughput,vibration_x",
-    minutes: Annotated[int, Query(ge=1, le=1440, description="History window in minutes")] = 60,
+    minutes: Annotated[int, Query(ge=1, le=525_600, description="History window in minutes")] = 60,
     points:  Annotated[int, Query(ge=10, le=3000, description="Number of data points to return")] = 300,
 ):
     """

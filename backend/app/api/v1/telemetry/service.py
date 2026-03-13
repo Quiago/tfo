@@ -51,16 +51,46 @@ import re
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 
-from sqlmodel import Session, col, func, select
+from sqlmodel import Session, col, delete as sql_delete, func, select
 
 from app.api.v1.connectors.backends.base import NodeInfo
 from app.api.v1.telemetry.models import TelemetryReading
 
 logger = logging.getLogger(__name__)
 
-POLL_INTERVAL     = int(os.getenv("TELEMETRY_POLL_INTERVAL", "5"))     # seconds
-RETENTION_HOURS   = int(os.getenv("TELEMETRY_RETENTION_HOURS", "24"))
+POLL_INTERVAL     = int(os.getenv("TELEMETRY_POLL_INTERVAL", "5"))       # seconds
+RETENTION_HOURS   = int(os.getenv("TELEMETRY_RETENTION_HOURS", "8760"))  # default: 1 year
 _CONNECTOR_ID_ENV = os.getenv("TELEMETRY_CONNECTOR_ID", "")
+
+# ── Backfill tier table ───────────────────────────────────────────────────────
+# Each entry: (min_age_seconds, step_seconds)
+# Older data uses coarser steps to keep total row count manageable while
+# still providing enough density for each granularity view:
+#   < 24 h  → POLL_INTERVAL s  (Minute / Hour views)
+#   24 h–7 d→ 300 s / 5 min   (Day view — 5 min bucket size)
+#   7 d–30 d→ 3 600 s / 1 h   (Month view — 1 h bucket size)
+#   ≥ 30 d  → 86 400 s / 1 d  (Year view — 1 d bucket size)
+#
+# Approximate total rows for a fresh DB fill over 1 year (40 signals):
+#   last 24 h   : 24×3600/5   × 40 = ~690 000 rows
+#   24 h–7 d    : 6×24×12     × 40 = ~69 000 rows
+#   7 d–30 d    : 23×24       × 40 = ~22 000 rows
+#   30 d–1 year : 335         × 40 = ~13 000 rows
+#   Total ≈ 794 000 rows — well within SQLite limits
+_BACKFILL_TIERS: list[tuple[int, int]] = [
+    (30 * 86_400,  86_400),          # ≥ 30 days : 1-day steps
+    (7  * 86_400,  3_600),           # ≥ 7 days  : 1-hour steps
+    (86_400,       300),             # ≥ 24 hours: 5-min steps
+    (0,            POLL_INTERVAL),   # < 24 hours: raw poll interval
+]
+
+
+def _backfill_step(age_seconds: float) -> int:
+    """Return the appropriate synthetic data interval for the given data age."""
+    for min_age, step in _BACKFILL_TIERS:
+        if age_seconds >= min_age:
+            return step
+    return POLL_INTERVAL
 
 # Virtual connector_id stored in DB rows when reading via OPC UA connector.
 # Matches whatever connector_id the user configured.  Stored per-reading so
@@ -310,16 +340,14 @@ class TelemetryPoller:
             session.commit()
             logger.debug("[Telemetry] Stored %d readings at %s", stored, now.isoformat())
 
-            # Prune old data
+            # Prune old data — bulk DELETE avoids loading rows into Python
             cutoff = now - timedelta(hours=RETENTION_HOURS)
-            old = session.exec(
-                select(TelemetryReading).where(TelemetryReading.recorded_at < cutoff)
-            ).all()
-            for r in old:
-                session.delete(r)
-            if old:
+            result = session.exec(
+                sql_delete(TelemetryReading).where(TelemetryReading.recorded_at < cutoff)
+            )
+            if result.rowcount:
                 session.commit()
-                logger.debug("[Telemetry] Pruned %d old readings", len(old))
+                logger.debug("[Telemetry] Pruned %d old readings", result.rowcount)
 
 
 # ── Query helpers ─────────────────────────────────────────────────────────────
@@ -560,21 +588,35 @@ def backfill_missing_history(
     Signal list is derived from the DB (re-uses existing signal metadata) and
     falls back to the static _NODE_INFO + robot catalog when the table is empty.
     """
-    now = datetime.now(UTC)
+    now         = datetime.now(UTC)
+    one_hour_ago = now - timedelta(hours=1)
+    one_year_ago = now - timedelta(hours=RETENTION_HOURS)
 
     with session_factory() as session:
-        # 1. Find last stored timestamp
-        last_at: datetime | None = session.exec(
-            select(func.max(TelemetryReading.recorded_at))
-        ).first()
+        # 1. Check whether historical data (older than 1 h) already exists.
+        #    If it does, the full backfill was already run; just fill the recent gap.
+        #    If it doesn't, fill the entire retention window from 1 year ago.
+        has_history: bool = session.exec(
+            select(TelemetryReading.id)
+            .where(TelemetryReading.recorded_at >= one_year_ago)
+            .where(TelemetryReading.recorded_at <  one_hour_ago)
+            .limit(1)
+        ).first() is not None
 
-        if not last_at:
-            start_dt = now - timedelta(hours=RETENTION_HOURS)
+        if has_history:
+            # Partial fill: start just after the last stored reading
+            last_at: datetime | None = session.exec(
+                select(func.max(TelemetryReading.recorded_at))
+            ).first()
+            if last_at is None:
+                start_dt = one_hour_ago
+            else:
+                if last_at.tzinfo is None:
+                    last_at = last_at.replace(tzinfo=UTC)
+                start_dt = last_at + timedelta(seconds=POLL_INTERVAL)
         else:
-            # SQLite returns naive datetimes; attach UTC so arithmetic works
-            if last_at.tzinfo is None:
-                last_at = last_at.replace(tzinfo=UTC)
-            start_dt = last_at + timedelta(seconds=POLL_INTERVAL)
+            # Full backfill: generate data for the entire retention window
+            start_dt = one_year_ago
 
         gap_seconds = (now - start_dt).total_seconds()
 
@@ -616,8 +658,7 @@ def backfill_missing_history(
                 return vals
         return (50.0, 10.0)  # safe generic fallback
 
-    # 4. Generate synthetic readings
-    step = timedelta(seconds=POLL_INTERVAL)
+    # 4. Generate synthetic readings using tiered step sizes
     signals = list(sig_meta.items())  # [(signal_id, (display_name, unit)), ...]
 
     batch: list[TelemetryReading] = []
@@ -647,7 +688,11 @@ def backfill_missing_history(
                     session.commit()
                 total_rows += len(batch)
                 batch = []
-        t += step
+
+        # Advance by age-appropriate step (older data → coarser resolution)
+        age_seconds = (now - t).total_seconds()
+        step = _backfill_step(age_seconds)
+        t += timedelta(seconds=step)
 
     # Flush remainder
     if batch:

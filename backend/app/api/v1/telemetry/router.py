@@ -105,8 +105,8 @@ def channel_metadata(session: Session = Depends(get_session)):
 @router.get("/timeline", response_model=list[TimelinePoint])
 def timeline_data(
     minutes: int = Query(
-        default=60, ge=1, le=1440,
-        description="History window in minutes for chart pre-population (max 24 h).",
+        default=60, ge=1, le=525_600,
+        description="History window in minutes for chart pre-population (max 1 year).",
     ),
     session: Session = Depends(get_session),
 ):
