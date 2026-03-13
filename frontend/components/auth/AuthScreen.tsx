@@ -70,6 +70,10 @@ function ServerStatusBadge({ status, onRetry }: { status: ServerStatus; onRetry:
   );
 }
 
+// In dev mode the RunPod wake-up flow is skipped — the form is immediately
+// usable against a local backend. Set NEXT_PUBLIC_DEV_MODE=true in .env.
+const DEV_MODE = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function AuthScreen() {
@@ -80,11 +84,13 @@ export function AuthScreen() {
   const [password, setPassword]   = useState('');
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState<string | null>(null);
-  const [serverStatus, setServerStatus] = useState<ServerStatus>({ phase: 'waking' });
+  const [serverStatus, setServerStatus] = useState<ServerStatus>(
+    DEV_MODE ? { phase: 'ready' } : { phase: 'waking' },
+  );
 
   const wakeAbortRef = useRef<AbortController | null>(null);
 
-  // ── Wake-up flow ───────────────────────────────────────────────────────────
+  // ── Wake-up flow (production only) ────────────────────────────────────────
 
   const wakeServer = () => {
     // Cancel any in-flight wake request
@@ -112,8 +118,9 @@ export function AuthScreen() {
       });
   };
 
-  // Start wake-up on mount; clean up on unmount
+  // Start wake-up on mount (skipped in dev mode); clean up on unmount
   useEffect(() => {
+    if (DEV_MODE) return;
     wakeServer();
     return () => { wakeAbortRef.current?.abort(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -181,8 +188,8 @@ export function AuthScreen() {
             <p className="text-zinc-500 text-sm">Industrial Intelligence Platform</p>
           </div>
 
-          {/* Server status */}
-          <ServerStatusBadge status={serverStatus} onRetry={wakeServer} />
+          {/* Server status (hidden in dev mode) */}
+          {!DEV_MODE && <ServerStatusBadge status={serverStatus} onRetry={wakeServer} />}
 
           {/* Mode toggle */}
           <div className="flex bg-zinc-800 rounded-lg p-1 mb-6">

@@ -59,6 +59,11 @@ function sleep(ms: number): Promise<void> {
 // ── Route handler ─────────────────────────────────────────────────────────────
 
 export async function POST(): Promise<NextResponse> {
+  // In dev mode skip RunPod entirely — local backend is assumed always up
+  if (process.env.NEXT_PUBLIC_DEV_MODE === 'true') {
+    return NextResponse.json({ ready: true });
+  }
+
   // Step 1: Signal RunPod to start the pod (fire-and-forget, errors are safe to ignore)
   await startRunpodPod();
 
