@@ -163,5 +163,73 @@ class TestTimelineEndpoint:
     def test_minutes_validation(self, client):
         r = client.get("/telemetry/timeline?minutes=0")
         assert r.status_code == 422
+        # Upper bound is 525_600 (1 year); 61 minutes is now a valid request
         r = client.get("/telemetry/timeline?minutes=61")
+        assert r.status_code == 200
+        # Exceeding the 1-year cap is still rejected
+        r = client.get("/telemetry/timeline?minutes=525601")
+        assert r.status_code == 422
+
+
+# ── /telemetry/node-map ───────────────────────────────────────────────────────
+
+class TestNodeMapEndpoint:
+    def test_empty_before_discovery(self, client):
+        r = client.get("/telemetry/node-map?connector_id=unknown-connector")
+        assert r.status_code == 200
+        assert r.json() == {}
+
+    def test_populated_after_publish(self, client):
+        from app.api.v1.telemetry import service as svc
+        svc._published_node_maps["test-conn"] = {
+            "ns=2;i=10": ("zone1_temperature", "Zone 1 Temperature", "°C"),
+            "ns=2;i=11": ("vibration_x",       "Vibration X",        "mm/s"),
+        }
+        r = client.get("/telemetry/node-map?connector_id=test-conn")
+        assert r.status_code == 200
+        data = r.json()
+        assert "ns=2;i=10" in data
+        assert data["ns=2;i=10"]["signal_id"] == "zone1_temperature"
+        assert data["ns=2;i=10"]["unit"] == "°C"
+        # Cleanup
+        del svc._published_node_maps["test-conn"]
+
+
+# ── /telemetry/timeline/signals ───────────────────────────────────────────────
+
+class TestTimelineSignalsEndpoint:
+    def _seed(self, session, signal_id: str, values: list[tuple[float, float]]):
+        """Seed (seconds_ago, value) pairs."""
+        from datetime import UTC, datetime, timedelta
+        from app.api.v1.telemetry.models import TelemetryReading
+        for secs_ago, val in values:
+            session.add(TelemetryReading(
+                connector_id="tc",
+                signal_id=signal_id,
+                display_name=signal_id,
+                value=val,
+                unit="kW",
+                recorded_at=datetime.now(UTC) - timedelta(seconds=secs_ago),
+            ))
+        session.commit()
+
+    def test_returns_signal_keyed_points(self, client, session):
+        self._seed(session, "total_power", [(60, 100.0), (30, 150.0), (5, 200.0)])
+        self._seed(session, "aux_power",   [(60,  20.0), (30,  25.0), (5,  30.0)])
+        r = client.get("/telemetry/timeline/signals?signal_ids=total_power,aux_power&minutes=2")
+        assert r.status_code == 200
+        points = r.json()
+        assert len(points) > 0
+        for p in points:
+            assert "timestamp" in p
+            # At least one signal should be present
+            assert "total_power" in p or "aux_power" in p
+
+    def test_empty_when_no_data(self, client):
+        r = client.get("/telemetry/timeline/signals?signal_ids=nonexistent&minutes=1")
+        assert r.status_code == 200
+        assert r.json() == []
+
+    def test_missing_signal_ids_returns_422(self, client):
+        r = client.get("/telemetry/timeline/signals?minutes=10")
         assert r.status_code == 422

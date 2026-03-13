@@ -25,7 +25,7 @@ from sqlmodel import Session, Session as SQLModelSession
 from app.api.v1.router import api_router
 from app.api.v1.llms import service as llm_service
 from app.api.v1.assets.service import auto_import_assets
-from app.api.v1.telemetry.service import TelemetryPoller, backfill_missing_history
+from app.api.v1.telemetry.service import TelemetryPoller, run_startup_backfill
 from app.core.logging import setup_logging
 from app.db.engine import create_db_and_tables, engine as db_engine
 from app.core.config import settings
@@ -38,17 +38,18 @@ async def lifespan(app: FastAPI):
 
     _sf = lambda: SQLModelSession(db_engine)
 
-    # Start telemetry poller immediately — don't wait for backfill
+    # Fill the DB with 1 year of synthetic history if it is empty.
+    # This runs BEFORE the poller so charts show data immediately, even
+    # before the user registers an OPC UA connector.
+    asyncio.create_task(
+        asyncio.to_thread(run_startup_backfill, _sf),
+        name="startup-backfill",
+    )
+
+    # Start telemetry poller — it discovers the connector on first cycle and
+    # automatically launches a one-time backfill if connector.backfill_done is False.
     poller = TelemetryPoller(session_factory=_sf)
     poller.start()
-
-    # Run backfill in a background thread so it never blocks startup or requests.
-    # backfill_missing_history() is a long-running sync function (~794k inserts
-    # on first boot); running it via asyncio.to_thread keeps the event loop free.
-    asyncio.create_task(
-        asyncio.to_thread(backfill_missing_history, _sf),
-        name="telemetry-backfill",
-    )
 
     async def _startup():
         # 1. Download + load priority model into RAM.

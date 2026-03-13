@@ -45,6 +45,9 @@ logging.basicConfig(
     format="%(asctime)s  %(name)-32s  %(levelname)-8s  %(message)s",
     datefmt="%H:%M:%S",
 )
+# asyncua emits an INFO log on every OPC UA read request — far too noisy.
+# Set WARNING so only real problems surface in the terminal.
+logging.getLogger("asyncua").setLevel(logging.WARNING)
 logger = logging.getLogger("simulated-data")
 
 # ── Config ────────────────────────────────────────────────────────────────────

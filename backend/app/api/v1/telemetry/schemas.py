@@ -62,3 +62,10 @@ class ChannelMeta(BaseModel):
     signal_id: str
     display_name: str
     unit: str
+
+
+class NodeMapEntry(BaseModel):
+    """OPC UA node_id → DB signal metadata, used to bridge discovery and DB queries."""
+    signal_id: str
+    display_name: str
+    unit: str

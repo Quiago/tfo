@@ -54,6 +54,16 @@ export interface ChannelMeta {
   unit: string;
 }
 
+/** OPC UA node → signal metadata entry returned by /telemetry/node-map. */
+export interface NodeMapEntry {
+  signal_id: string;
+  display_name: string;
+  unit: string;
+}
+
+/** Generic downsampled timeline point keyed by signal_id. */
+export type TelemetrySignalPoint = { timestamp: number } & Record<string, number>;
+
 export async function getLatestReadings(signalIds?: string[]): Promise<LatestReading[]> {
   const qs = signalIds?.length ? `?signal_ids=${signalIds.join(',')}` : '';
   return apiFetch<LatestReading[]>(`/telemetry/readings/latest${qs}`);
@@ -82,17 +92,52 @@ export async function getSignalStats(
 }
 
 /**
- * Fetch pre-computed timeline data to seed the frontend chart buffer.
- * Returns normalized (0–100) values + raw engineering-unit values
- * for the last `minutes` of stored telemetry.
+ * Fetch pre-computed 4-channel timeline data to seed the frontend chart buffer.
+ *
+ * When signalIds is provided (up to 4 items), those DB signals are mapped to the
+ * temperature / vibration / pressure / humidity slots so the historical data
+ * matches the connector's live polling channels.
  */
-export async function getTelemetryTimeline(minutes = 10): Promise<TelemetryTimelinePoint[]> {
-  return apiFetch<TelemetryTimelinePoint[]>(`/telemetry/timeline?minutes=${minutes}`);
+export async function getTelemetryTimeline(
+  minutes = 10,
+  signalIds?: string[],
+): Promise<TelemetryTimelinePoint[]> {
+  const params = new URLSearchParams({ minutes: String(minutes) });
+  if (signalIds && signalIds.length > 0) {
+    params.set('signal_ids', signalIds.join(','));
+  }
+  return apiFetch<TelemetryTimelinePoint[]>(`/telemetry/timeline?${params}`);
+}
+
+/**
+ * Fetch downsampled time-series data for arbitrary signal IDs.
+ * Returns one object per time bucket: { timestamp, <signal_id>: normalised, raw_<signal_id>: raw }
+ * Used for energy channel history (total_power, aux_power, power_factor).
+ */
+export async function getTelemetrySignals(
+  signalIds: string[],
+  minutes = 10,
+): Promise<TelemetrySignalPoint[]> {
+  const params = new URLSearchParams({
+    signal_ids: signalIds.join(','),
+    minutes: String(minutes),
+  });
+  return apiFetch<TelemetrySignalPoint[]>(`/telemetry/timeline/signals?${params}`);
+}
+
+/**
+ * Fetch the OPC UA node_id → signal metadata map for a connector.
+ * Populated after the first TelemetryPoller discovery cycle.
+ * Returns an empty object if discovery has not happened yet.
+ */
+export async function getNodeMap(connectorId: string): Promise<Record<string, NodeMapEntry>> {
+  return apiFetch<Record<string, NodeMapEntry>>(
+    `/telemetry/node-map?connector_id=${encodeURIComponent(connectorId)}`,
+  );
 }
 
 /**
  * Fetch display names and units for the 4 chart channels from the backend.
- * Sourced from the latest DB readings (falls back to static catalogue).
  */
 export async function getChannelMetadata(): Promise<ChannelMeta[]> {
   return apiFetch<ChannelMeta[]>('/telemetry/channels');

@@ -66,21 +66,12 @@ POLL_INTERVAL     = int(os.getenv("TELEMETRY_POLL_INTERVAL", "5"))       # secon
 RETENTION_HOURS   = int(os.getenv("TELEMETRY_RETENTION_HOURS", "8760"))  # default: 1 year
 _CONNECTOR_ID_ENV = os.getenv("TELEMETRY_CONNECTOR_ID", "")
 
+# Virtual connector_id used for the one-time startup historical backfill.
+# This data is shown in charts before any real OPC UA connector is configured.
+STARTUP_CONNECTOR_ID = "_startup_"
+
 # ── Backfill tier table ───────────────────────────────────────────────────────
 # Each entry: (min_age_seconds, step_seconds)
-# Older data uses coarser steps to keep total row count manageable while
-# still providing enough density for each granularity view:
-#   < 24 h  → POLL_INTERVAL s  (Minute / Hour views)
-#   24 h–7 d→ 300 s / 5 min   (Day view — 5 min bucket size)
-#   7 d–30 d→ 3 600 s / 1 h   (Month view — 1 h bucket size)
-#   ≥ 30 d  → 86 400 s / 1 d  (Year view — 1 d bucket size)
-#
-# Approximate total rows for a fresh DB fill over 1 year (40 signals):
-#   last 24 h   : 24×3600/5   × 40 = ~690 000 rows
-#   24 h–7 d    : 6×24×12     × 40 = ~69 000 rows
-#   7 d–30 d    : 23×24       × 40 = ~22 000 rows
-#   30 d–1 year : 335         × 40 = ~13 000 rows
-#   Total ≈ 794 000 rows — well within SQLite limits
 _BACKFILL_TIERS: list[tuple[int, int]] = [
     (30 * 86_400,  86_400),          # ≥ 30 days : 1-day steps
     (7  * 86_400,  3_600),           # ≥ 7 days  : 1-hour steps
@@ -98,16 +89,6 @@ def _backfill_step(age_seconds: float) -> int:
 
 
 # ── Timeline downsampling tiers ───────────────────────────────────────────────
-# When the frontend requests a large history window the DB must aggregate
-# (GROUP BY time bucket) before sending data — otherwise /telemetry/timeline
-# would try to return hundreds of thousands of raw rows.
-#
-# Each entry: (min_minutes_threshold, bucket_seconds)
-# Matches the frontend GRANULARITY_CONFIG bucketMs values:
-#   Year  (>30d) → 1-day buckets    (86 400 s)  → ~365 points
-#   Month (>1d)  → 1-hour buckets   (3 600 s)   → ~720 points / 30d
-#   Day   (>1h)  → 5-min buckets    (300 s)      → ~288 points / 24h
-#   Hour/Minute  → raw (bucket_seconds = 0)
 _DOWNSAMPLE_TIERS: list[tuple[int, int]] = [
     (43_200, 86_400),  # > 30 days  → 1-day   buckets
     (1_440,   3_600),  # > 24 hours → 1-hour  buckets
@@ -123,11 +104,6 @@ def _downsample_bucket_seconds(minutes: int) -> int:
             return bucket_s
     return 0
 
-
-# Virtual connector_id stored in DB rows when reading via OPC UA connector.
-# Matches whatever connector_id the user configured.  Stored per-reading so
-# we can support multiple connectors in the future.
-CONNECTOR_ID_DEFAULT = "simulated-factory"
 
 # ── OPC UA display_name → (signal_id, human_label, unit) ─────────────────────
 _NODE_INFO: dict[str, tuple[str, str, str]] = {
@@ -163,9 +139,6 @@ _ROBOT_FIELDS: dict[str, tuple[str, str, str]] = {
 _ROBOT_RE = re.compile(r"^Robot(\d+)$")
 
 # ── Synthetic baseline values (signal_id → (base, variance)) ─────────────────
-# Used by backfill_missing_history() to generate realistic-looking history.
-# base    = mid-point of the signal's normal operating range
-# variance = ±spread around the base (peak-to-peak / 2)
 _SIGNAL_BASELINES: dict[str, tuple[float, float]] = {
     "ambient_temperature": (24.0, 4.0),
     "zone1_temperature":   (72.0, 8.0),
@@ -196,12 +169,32 @@ _SIGNAL_BASELINES: dict[str, tuple[float, float]] = {
 _BACKFILL_ROBOT_COUNT = 4
 
 # ── Frontend 4-channel mapping: chart field → signal_id ──────────────────────
+# Used as fallback when the frontend does not supply explicit signal_ids.
 TIMELINE_FIELD_MAP: dict[str, str] = {
     "temperature": "zone1_temperature",
     "vibration":   "vibration_x",
     "pressure":    "line_pressure",
     "humidity":    "humidity",
 }
+
+# ── Published node maps (populated by TelemetryPoller after discovery) ────────
+# connector_id → { node_id → (signal_id, display_name, unit) }
+# Exposed via GET /telemetry/node-map so the frontend can resolve OPC UA
+# node_ids to DB signal_ids without hard-coding the mapping itself.
+_published_node_maps: dict[str, dict[str, tuple[str, str, str]]] = {}
+
+
+def get_node_map(connector_id: str) -> dict[str, dict]:
+    """Return the OPC UA node_id → signal metadata map for a connector.
+
+    Populated after the TelemetryPoller completes its first discovery cycle.
+    Returns an empty dict if discovery has not happened yet.
+    """
+    raw = _published_node_maps.get(connector_id, {})
+    return {
+        node_id: {"signal_id": sig[0], "display_name": sig[1], "unit": sig[2]}
+        for node_id, sig in raw.items()
+    }
 
 
 def _node_to_signal(node: NodeInfo) -> tuple[str, str, str] | None:
@@ -223,10 +216,6 @@ def _node_to_signal(node: NodeInfo) -> tuple[str, str, str] | None:
             field_id, field_name, unit = _ROBOT_FIELDS[name]
             return (f"robot{robot_id}_{field_id}", f"Robot {robot_id} {field_name}", unit)
 
-    # Everything else is skipped:
-    #   - Energy/Robot{N}Power (duplicate of AssemblyLine robot power)
-    #   - Status strings
-    #   - OPC UA metadata nodes
     return None
 
 
@@ -247,6 +236,8 @@ class TelemetryPoller:
         self._connector_id: str | None = None
         # node_id → (signal_id, display_name, unit) built after first discovery
         self._node_map: dict[str, tuple[str, str, str]] = {}
+        # connector_ids for which we've already launched a backfill task
+        self._backfill_launched: set[str] = set()
 
     def start(self) -> None:
         self._task = asyncio.create_task(self._run(), name="telemetry-poller")
@@ -297,6 +288,9 @@ class TelemetryPoller:
                 if sig:
                     self._node_map[node.node_id] = sig
 
+            # Publish the node map so the /telemetry/node-map endpoint can serve it
+            _published_node_maps[connector_id] = self._node_map
+
             logger.info(
                 "[Telemetry] Node map built — %d/%d nodes mapped to signals",
                 len(self._node_map), result.node_count,
@@ -316,6 +310,30 @@ class TelemetryPoller:
                 logger.debug("[Telemetry] poll error: %s", exc)
             await asyncio.sleep(POLL_INTERVAL)
 
+    async def _maybe_launch_backfill(self, connector_id: str) -> None:
+        """
+        Checks if the connector needs a one-time backfill and launches it in a
+        background thread if so.  Called once after the node map is built.
+        """
+        if connector_id in self._backfill_launched:
+            return
+        # Mark immediately so concurrent poll cycles don't double-launch
+        self._backfill_launched.add(connector_id)
+
+        from app.api.v1.connectors.models import Connector
+        with self._session_factory() as session:
+            connector = session.get(Connector, connector_id)
+            needs_backfill = connector is not None and not connector.backfill_done
+
+        if needs_backfill:
+            logger.info("[Telemetry] Launching one-time backfill for connector %s", connector_id)
+            asyncio.create_task(
+                asyncio.to_thread(run_connector_backfill, connector_id, self._session_factory),
+                name=f"backfill-{connector_id}",
+            )
+        else:
+            logger.debug("[Telemetry] Backfill already done for connector %s — skipping", connector_id)
+
     async def _poll_cycle(self) -> None:
         # Resolve which connector to use (cached after first success)
         if self._connector_id is None:
@@ -328,6 +346,9 @@ class TelemetryPoller:
         if not ok:
             self._node_map = {}   # force re-discovery next cycle
             return
+
+        # After discovery succeeds, check if a one-time backfill is needed
+        await self._maybe_launch_backfill(self._connector_id)
 
         # Read all mapped nodes in one batch
         node_ids = list(self._node_map.keys())
@@ -479,12 +500,7 @@ def get_statistics_absolute(
     end_ms: int,
     connector_id: str | None = None,
 ) -> list[dict]:
-    """Aggregated stats for specific absolute epoch-ms timestamps.
-
-    Unlike get_statistics (which uses NOW-N minutes), this queries the exact
-    user-drawn range so the results match what the user sees on the Timeline.
-    If signal_ids is empty, stats are returned for all signals active in the range.
-    """
+    """Aggregated stats for specific absolute epoch-ms timestamps."""
     start_dt = datetime.fromtimestamp(start_ms / 1000, UTC)
     end_dt   = datetime.fromtimestamp(end_ms   / 1000, UTC)
 
@@ -529,34 +545,21 @@ def get_statistics_absolute(
     ]
 
 
-def get_timeline_history(
+def _build_bucketed_data(
     session: Session,
-    minutes: int = 10,
-    connector_id: str | None = None,
-) -> list[dict]:
+    signal_ids: list[str],
+    minutes: int,
+    connector_id: str | None,
+) -> dict[int, dict[str, float]]:
     """
-    Pre-computed 4-channel timeline for the frontend chart.
-
-    For small windows (≤ 1h) returns raw poll-cycle buckets.
-    For larger windows the query uses DB-level GROUP BY aggregation so the
-    response is always ≤ ~800 points regardless of the requested window:
-      > 30 days  → 1-day   buckets  (~365 points / year)
-      > 24 hours → 1-hour  buckets  (~720 points / 30 days)
-      > 1 hour   → 5-min   buckets  (~288 points / 24 hours)
-      ≤ 1 hour   → raw POLL_INTERVAL buckets
-
-    Each point is normalised to 0–100 relative to the window min/max so
-    the shape is identical to what the live frontend hook produces.
+    Internal helper: builds time-bucketed { ts_ms → { signal_id → avg_value } }
+    with DB-level downsampling for large windows.
     """
-    signal_ids = list(TIMELINE_FIELD_MAP.values())
-    cutoff     = datetime.now(UTC) - timedelta(minutes=minutes)
-    bucket_s   = _downsample_bucket_seconds(minutes)
-
-    # ── Build time-bucketed (signal_id → avg_value) map ──────────────────────
+    cutoff   = datetime.now(UTC) - timedelta(minutes=minutes)
+    bucket_s = _downsample_bucket_seconds(minutes)
     buckets: dict[int, dict[str, float]] = defaultdict(dict)
 
     if bucket_s == 0:
-        # Raw mode — existing behaviour, good for Minute / Hour views
         readings = query_time_range(session, signal_ids, minutes, connector_id)
         raw_bucket_ms = POLL_INTERVAL * 1000
         for r in readings:
@@ -564,19 +567,9 @@ def get_timeline_history(
             key   = (ts_ms // raw_bucket_ms) * raw_bucket_ms
             buckets[key][r.signal_id] = r.value
     else:
-        # DB-level downsampling — GROUP BY time bucket before sending to Python.
-        #
-        # Use literal_column / sa_text with an f-string so SELECT, GROUP BY, and
-        # ORDER BY all emit the exact same SQL fragment.  SQLAlchemy would render
-        # the ORM expression differently in each clause, causing SQLite to treat
-        # them as distinct columns and skip aggregation entirely.
-        #
-        # bucket_s comes from the internal _DOWNSAMPLE_TIERS table — never from
-        # user input — so f-string interpolation is safe here.
         bucket_expr = (
             f"(CAST(strftime('%s', recorded_at) AS INTEGER) / {bucket_s}) * {bucket_s}"
         )
-
         stmt = (
             select(
                 literal_column(bucket_expr).label("ts_epoch"),
@@ -593,15 +586,49 @@ def get_timeline_history(
             .group_by(sa_text(bucket_expr), TelemetryReading.signal_id)
             .order_by(sa_text(bucket_expr))
         )
-
         for row in session.execute(stmt).all():
             ts_ms = int(row.ts_epoch) * 1_000
             buckets[ts_ms][row.signal_id] = float(row.avg_val)
 
-    # ── Normalise 0–100 across the full window ────────────────────────────────
-    field_vals: dict[str, list[float]] = {f: [] for f in TIMELINE_FIELD_MAP}
+    return buckets
+
+
+def get_timeline_history(
+    session: Session,
+    minutes: int = 10,
+    connector_id: str | None = None,
+    signal_ids: list[str] | None = None,
+) -> list[dict]:
+    """
+    Pre-computed 4-channel timeline for the frontend chart.
+
+    When signal_ids is provided (4 items), those signals are mapped to the
+    temperature / vibration / pressure / humidity slots respectively.
+    This lets the frontend pass its dynamically discovered signal_ids so the
+    historical data matches the live polling channels.
+
+    Falls back to TIMELINE_FIELD_MAP when signal_ids is None or incomplete.
+
+    Each point is normalised to 0–100 relative to the window min/max.
+    """
+    # Build the channel→signal mapping from caller-supplied ids or the default.
+    default_slots = list(TIMELINE_FIELD_MAP.keys())   # ['temperature','vibration',...]
+    default_sigs  = list(TIMELINE_FIELD_MAP.values())  # ['zone1_temperature',...]
+
+    if signal_ids and len(signal_ids) > 0:
+        # Pad with defaults for any missing slots
+        padded = list(signal_ids) + default_sigs[len(signal_ids):]
+        field_map = dict(zip(default_slots, padded[:4]))
+    else:
+        field_map = TIMELINE_FIELD_MAP
+
+    query_sigs = list(field_map.values())
+    buckets    = _build_bucketed_data(session, query_sigs, minutes, connector_id)
+
+    # Normalise 0–100 across the full window per channel
+    field_vals: dict[str, list[float]] = {f: [] for f in field_map}
     for bkt in buckets.values():
-        for field, sig_id in TIMELINE_FIELD_MAP.items():
+        for field, sig_id in field_map.items():
             v = bkt.get(sig_id)
             if v is not None:
                 field_vals[field].append(v)
@@ -619,7 +646,7 @@ def get_timeline_history(
     for ts_ms in sorted(buckets.keys()):
         bkt   = buckets[ts_ms]
         point: dict = {"timestamp": ts_ms}
-        for field, sig_id in TIMELINE_FIELD_MAP.items():
+        for field, sig_id in field_map.items():
             v = bkt.get(sig_id)
             if v is None:
                 break
@@ -632,133 +659,161 @@ def get_timeline_history(
     return result
 
 
-def backfill_missing_history(
-    session_factory,
-    connector_id: str = CONNECTOR_ID_DEFAULT,
-) -> None:
-    """Populate TelemetryReading rows for any gap between the last stored
-    reading and now.
-
-    Intended to be called once at startup (before the poller begins) so the
-    frontend timeline always has a full RETENTION_HOURS window even after a
-    server restart.
-
-    Algorithm
-    ---------
-    1. Query MAX(recorded_at) — determines where real data ends.
-    2. If the table is empty → start from now() − RETENTION_HOURS.
-       If data exists → start from last_recorded_at + POLL_INTERVAL.
-    3. Skip if the gap is less than POLL_INTERVAL * 2 seconds (nothing to do).
-    4. Walk from start_dt to now() in POLL_INTERVAL steps, generating one
-       synthetic TelemetryReading per signal per step.
-    5. Bulk insert in commit batches of 1 000 rows.
-
-    Signal values are plausible but synthetic:
-        value = base + sin(elapsed_hours * 0.3) * variance * 0.5
-                     + gauss(0, variance * 0.2)
-
-    Signal list is derived from the DB (re-uses existing signal metadata) and
-    falls back to the static _NODE_INFO + robot catalog when the table is empty.
+def get_timeline_history_by_signals(
+    session: Session,
+    signal_ids: list[str],
+    minutes: int = 10,
+    connector_id: str | None = None,
+) -> list[dict]:
     """
-    now         = datetime.now(UTC)
-    one_hour_ago = now - timedelta(hours=1)
-    one_year_ago = now - timedelta(hours=RETENTION_HOURS)
+    Generic downsampled timeline for arbitrary signal_ids.
 
+    Returns one dict per time bucket: { "timestamp": ms, <signal_id>: normalised,
+    "raw_<signal_id>": raw_value, ... }
+
+    Used by the frontend to fetch energy channel history (total_power, aux_power,
+    power_factor) with the same DB-level downsampling as the 4-channel endpoint.
+    """
+    buckets = _build_bucketed_data(session, signal_ids, minutes, connector_id)
+
+    # Collect all values per signal for normalisation
+    sig_vals: dict[str, list[float]] = {s: [] for s in signal_ids}
+    for bkt in buckets.values():
+        for sig_id in signal_ids:
+            v = bkt.get(sig_id)
+            if v is not None:
+                sig_vals[sig_id].append(v)
+
+    def _norm(v: float, vals: list[float]) -> float:
+        if len(vals) < 2:
+            return 50.0
+        mn, mx = min(vals), max(vals)
+        spread = mx - mn
+        if spread < 0.001:
+            return 50.0
+        return round(((v - mn) / spread) * 100, 2)
+
+    result = []
+    for ts_ms in sorted(buckets.keys()):
+        bkt   = buckets[ts_ms]
+        point: dict = {"timestamp": ts_ms}
+        for sig_id in signal_ids:
+            v = bkt.get(sig_id)
+            if v is not None:
+                point[sig_id]           = _norm(v, sig_vals[sig_id])
+                point[f"raw_{sig_id}"]  = round(v, 4)
+        result.append(point)
+
+    return result
+
+
+def run_startup_backfill(session_factory) -> None:
+    """
+    One-time synthetic backfill run at server startup before any connector exists.
+
+    Fills 1 year of historical data for the full signal catalog using the virtual
+    connector_id STARTUP_CONNECTOR_ID.  Skipped if the DB already has data so that
+    subsequent restarts are instant.
+
+    Called from main.py lifespan in a background thread — never blocks the server.
+    """
+    from sqlmodel import select, func as sql_func
     with session_factory() as session:
-        # 1. Decide start point by inspecting the OLDEST row in the DB.
-        #
-        #    Full backfill is needed when the DB is empty OR when the oldest
-        #    stored row is NOT close to the retention boundary — meaning the
-        #    server has only been running for a short time (hours / days) and
-        #    Month / Year views would be mostly empty.
-        #
-        #    "Close to boundary" = oldest row is at least (RETENTION_HOURS − 48h)
-        #    old, i.e. within 2 days of the 1-year mark.  This avoids re-running
-        #    the expensive full backfill every time the server restarts after the
-        #    initial fill.
-        oldest_at: datetime | None = session.exec(
-            select(func.min(TelemetryReading.recorded_at))
-        ).first()
-
-        if oldest_at is None:
-            # Empty DB — full year backfill
-            start_dt = one_year_ago
-        else:
-            if oldest_at.tzinfo is None:
-                oldest_at = oldest_at.replace(tzinfo=UTC)
-            age_of_oldest = (now - oldest_at).total_seconds()
-            full_retention_s = (RETENTION_HOURS - 48) * 3_600  # 2-day tolerance
-
-            if age_of_oldest >= full_retention_s:
-                # Full backfill already done — only fill the gap since last shutdown
-                last_at: datetime | None = session.exec(
-                    select(func.max(TelemetryReading.recorded_at))
-                ).first()
-                if last_at is None:
-                    start_dt = one_year_ago
-                else:
-                    if last_at.tzinfo is None:
-                        last_at = last_at.replace(tzinfo=UTC)
-                    start_dt = last_at + timedelta(seconds=POLL_INTERVAL)
-            else:
-                # DB only has recent data (hours / days) — full year backfill needed
-                logger.info(
-                    "[Telemetry] backfill — oldest data is %.1f h old (threshold %.0f h); "
-                    "running full-year backfill",
-                    age_of_oldest / 3_600,
-                    full_retention_s / 3_600,
-                )
-                start_dt = one_year_ago
-
-        gap_seconds = (now - start_dt).total_seconds()
-
-        # 3. Nothing meaningful to fill
-        if gap_seconds < POLL_INTERVAL * 2:
-            logger.info(
-                "[Telemetry] backfill — gap %.0fs < threshold; nothing to do", gap_seconds
-            )
+        count = session.exec(select(sql_func.count(TelemetryReading.id))).one()
+        if count > 0:
+            logger.info("[Telemetry] Startup backfill skipped — DB already has %d rows", count)
             return
 
-        # Collect signal metadata from DB (signal_id → (display_name, unit))
-        existing: list[TelemetryReading] = session.exec(
-            select(TelemetryReading).limit(500)
-        ).all()
+    logger.info("[Telemetry] DB is empty — running startup backfill (1 year of synthetic history)")
+    _run_backfill_inner(STARTUP_CONNECTOR_ID, session_factory)
+    logger.info("[Telemetry] Startup backfill complete — server is ready with historical data")
 
+
+def run_connector_backfill(connector_id: str, session_factory) -> None:
+    """
+    One-time historical backfill for a single OPC UA connector.
+
+    Checks connector.backfill_done before running; marks it True on completion
+    so it never re-runs for this connector.
+
+    Before generating new data, removes the startup placeholder rows so that
+    only real connector data remains in the DB.
+    """
+    from app.api.v1.connectors.models import Connector
+
+    # Guard: skip if already done (concurrent launch safety)
+    with session_factory() as session:
+        connector = session.get(Connector, connector_id)
+        if connector is None or connector.backfill_done:
+            logger.info("[Telemetry] backfill skipped — already done for %s", connector_id)
+            return
+
+    # Remove startup placeholder so charts show only this connector's data
+    with session_factory() as session:
+        result = session.exec(
+            sql_delete(TelemetryReading).where(
+                TelemetryReading.connector_id == STARTUP_CONNECTOR_ID
+            )
+        )
+        if result.rowcount:
+            session.commit()
+            logger.info(
+                "[Telemetry] Removed %d startup placeholder rows before connector backfill",
+                result.rowcount,
+            )
+
+    _run_backfill_inner(connector_id, session_factory)
+
+    # Mark done — poller will never trigger backfill again for this connector
+    with session_factory() as session:
+        connector = session.get(Connector, connector_id)
+        if connector:
+            connector.backfill_done = True
+            session.add(connector)
+            session.commit()
+
+
+def _run_backfill_inner(connector_id: str, session_factory) -> None:
+    """
+    Core backfill logic shared by startup and connector backfills.
+
+    Generates synthetic readings for the full signal catalog from
+    (now - RETENTION_HOURS) to now using tiered resolution.
+    """
+    now      = datetime.now(UTC)
+    start_dt = now - timedelta(hours=RETENTION_HOURS)
+    gap_s    = (now - start_dt).total_seconds()
+
+    logger.info(
+        "[Telemetry] backfill start — connector=%s covering %.0f h",
+        connector_id, gap_s / 3_600,
+    )
+
+    # Build signal catalog
     sig_meta: dict[str, tuple[str, str]] = {}
-    for r in existing:
-        if r.signal_id not in sig_meta:
-            sig_meta[r.signal_id] = (r.display_name, r.unit)
-
-    # Fall back to static catalog when DB was empty
-    if not sig_meta:
-        for display_name, (signal_id, human_name, unit) in _NODE_INFO.items():
-            sig_meta[signal_id] = (human_name, unit)
-        for n in range(1, _BACKFILL_ROBOT_COUNT + 1):
-            for field_name, (field_id, human_name, unit) in _ROBOT_FIELDS.items():
-                if field_name == "Status":
-                    continue
-                sig_id = f"robot{n}_{field_id}"
-                sig_meta[sig_id] = (f"Robot {n} {human_name}", unit)
+    for _dn, (signal_id, human_name, unit) in _NODE_INFO.items():
+        sig_meta[signal_id] = (human_name, unit)
+    for n in range(1, _BACKFILL_ROBOT_COUNT + 1):
+        for field_name, (field_id, human_name, unit) in _ROBOT_FIELDS.items():
+            if field_name == "Status":
+                continue
+            sig_meta[f"robot{n}_{field_id}"] = (f"Robot {n} {human_name}", unit)
 
     def _baseline(signal_id: str) -> tuple[float, float]:
-        """Return (base, variance) for a given signal_id."""
         if signal_id in _SIGNAL_BASELINES:
             return _SIGNAL_BASELINES[signal_id]
-        # Robot sub-field suffix match: e.g. robot3_joint_temp → _joint_temp
         for suffix, vals in _SIGNAL_BASELINES.items():
             if suffix.startswith("_") and signal_id.endswith(suffix):
                 return vals
-        return (50.0, 10.0)  # safe generic fallback
+        return (50.0, 10.0)
 
-    # 4. Generate synthetic readings using tiered step sizes
-    signals = list(sig_meta.items())  # [(signal_id, (display_name, unit)), ...]
-
+    signals = list(sig_meta.items())
     batch: list[TelemetryReading] = []
     total_rows = 0
     t = start_dt
 
     while t <= now:
-        elapsed_hours = (t - start_dt).total_seconds() / 3600.0
+        elapsed_hours = (t - start_dt).total_seconds() / 3_600.0
         for signal_id, (display_name, unit) in signals:
             base, variance = _baseline(signal_id)
             value = (
@@ -774,19 +829,16 @@ def backfill_missing_history(
                 unit=unit,
                 recorded_at=t,
             ))
-            if len(batch) >= 1000:
+            if len(batch) >= 1_000:
                 with session_factory() as session:
                     session.add_all(batch)
                     session.commit()
                 total_rows += len(batch)
                 batch = []
 
-        # Advance by age-appropriate step (older data → coarser resolution)
         age_seconds = (now - t).total_seconds()
-        step = _backfill_step(age_seconds)
-        t += timedelta(seconds=step)
+        t += timedelta(seconds=_backfill_step(age_seconds))
 
-    # Flush remainder
     if batch:
         with session_factory() as session:
             session.add_all(batch)
@@ -794,12 +846,8 @@ def backfill_missing_history(
         total_rows += len(batch)
 
     logger.info(
-        "[Telemetry] backfill — inserted %d rows covering %s → %s (%.1f h, %d signals)",
-        total_rows,
-        start_dt.strftime("%Y-%m-%d %H:%M UTC"),
-        now.strftime("%Y-%m-%d %H:%M UTC"),
-        gap_seconds / 3600,
-        len(signals),
+        "[Telemetry] backfill done — connector=%s rows=%d signals=%d span=%.1fh",
+        connector_id, total_rows, len(signals), gap_s / 3_600,
     )
 
 
@@ -810,7 +858,6 @@ def get_channel_metadata(session: Session) -> list[dict]:
 
     Falls back to the static _NODE_INFO catalogue when the DB has no data yet.
     """
-    # Static fallback from the signal catalogue
     _FALLBACK: dict[str, tuple[str, str, str]] = {
         "temperature": _NODE_INFO["Zone1Temperature"],
         "vibration":   _NODE_INFO["Vibration_X"],
@@ -818,7 +865,6 @@ def get_channel_metadata(session: Session) -> list[dict]:
         "humidity":    _NODE_INFO["Humidity"],
     }
 
-    # Fetch latest reading per channel signal_id from DB
     signal_ids = list(TIMELINE_FIELD_MAP.values())
     latest = get_latest_readings(session, signal_ids)
     by_sig = {r.signal_id: r for r in latest}
