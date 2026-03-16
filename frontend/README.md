@@ -1,27 +1,48 @@
-# TRIPOLAR - Industrial Digital Twin Platform
+# TFO Frontend
 
-> Real-time monitoring and predictive analytics for industrial systems
+Next.js dashboard for TRIPOLAR Facility Operations. Voice-first, mobile-first industrial workflow platform for frontline workers.
 
-A headless, component-first Next.js 14+ application designed for rapid development of complex industrial visualization and control systems.
+---
 
-## 🚀 Quick Start
+## Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| Framework | Next.js 16+ (App Router) |
+| Language | TypeScript 5.9+ (strict mode) |
+| Styling | Tailwind CSS v4 |
+| State | Zustand 5 + Immer |
+| Charts | Recharts 3 · Lightweight Charts |
+| Workflow | React Flow 11 |
+| 3D | React Three Fiber + Three.js |
+| Icons | Lucide React |
+| Validation | Zod |
+| Testing | Vitest |
+
+---
+
+## Quick Start
 
 ### Prerequisites
-- Node.js 18+
-- npm or yarn
 
-### Installation & Development
+- Node.js 18+
+
+### Development
 
 ```bash
-# Install dependencies (already done)
+cd frontend
+
+# Copy environment file
+cp .env.example .env.local
+
+# Install dependencies
 npm install
 
-# Start development server
+# Start dev server
 npm run dev
-
-# Open in browser
-# http://localhost:3000
 ```
+
+App runs at `http://localhost:3000`.
 
 ### Production Build
 
@@ -32,306 +53,288 @@ npm start
 
 ---
 
-## 📁 Project Structure
-
-```
-tripolar/
-├── app/                              # Next.js App Router
-│   ├── page.tsx                     # Home page
-│   ├── layout.tsx                   # Root layout
-│   ├── globals.css                  # Global styles
-│   ├── api/                         # API routes (future)
-│   └── playground/
-│       └── timeline/
-│           └── page.tsx             # Timeline component testing
-│
-├── components/                       # Reusable UI components
-│   ├── ui/                          # Atomic design system (buttons, inputs)
-│   └── features/                    # Complex business logic components
-│       └── Timeline.tsx             # Financial-style timeline
-│
-├── lib/                             # Core logic and utilities
-│   ├── hooks/
-│   │   ├── useTimeline.ts          # Timeline logic (zoom, pan, metrics)
-│   │   └── useMockData.ts          # Mock data generation
-│   ├── types/
-│   │   └── timeline.ts             # TypeScript interfaces
-│   ├── store/                       # Zustand stores (future)
-│   └── utils/                       # Helper functions
-│
-├── docs/                            # Technical documentation
-│   ├── timeline.md                 # Timeline component guide
-│   └── [component].md              # Component-specific docs
-│
-├── public/                          # Static assets
-├── styles/                          # Additional CSS (if needed)
-├── package.json                     # Dependencies & scripts
-├── tsconfig.json                    # TypeScript configuration
-├── tailwind.config.ts               # Tailwind CSS configuration
-├── next.config.js                   # Next.js configuration
-└── CHANGELOG.md                     # Version history
-```
-
----
-
-## 📊 Components
-
-### Timeline (`components/features/Timeline.tsx`)
-
-The flagship component of TRIPOLAR. A financial-style time series visualization with:
-
-- **Hybrid Display**: 80% historical data (solid line) + 20% predictive data (dashed line)
-- **Zoom Levels**: Minute, Hour, Day, Week, Year
-- **Confidence Intervals**: Visual uncertainty bands for predictions
-- **Real-Time Streaming**: Mock data with auto-update capability
-- **Responsive Design**: Mobile, tablet, and desktop optimized
-
-**Test it**: http://localhost:3000/playground/timeline
-
----
-
-## 🎣 Hooks
-
-### `useTimeline(historicalData, predictions, options)`
-
-Manages timeline visualization logic:
-
-```typescript
-const {
-  zoomLevel,
-  visibleRange,
-  visibleHistoricalData,
-  visiblePredictions,
-  metrics,
-  handlers: { handleZoom, handlePan, resetView },
-} = useTimeline(data, predictions);
-```
-
-**Options:**
-- `historicalRatio`: Display ratio (0.0-1.0), default 0.8
-- `initialZoom`: Starting zoom level, default 'day'
-
-### `useMockData(autoStream?)`
-
-Generates realistic financial time series data:
-
-```typescript
-const {
-  historicalData,
-  predictions,
-  isLoading,
-  refetch,
-  addNewDataPoint,
-} = useMockData(true); // true = auto-stream every 15s
-```
-
-**Features:**
-- Brownian motion with drift
-- Mean reversion
-- Confidence interval calculation
-- Manual data injection
-
----
-
-## 🎨 Styling
-
-- **Framework**: Tailwind CSS v4
-- **Theme**: Slate-based grayscale (ready for design system)
-- **Responsive**: Mobile-first utility classes
-- **Charts**: Custom Recharts styling in `app/globals.css`
-
----
-
-## 🏗️ Architecture Principles
-
-### 1. **Headless Component Design**
-Logic and presentation are separated:
-- Hooks (`useTimeline`, `useMockData`) contain logic
-- Components consume hooks for UI rendering
-
-### 2. **Type Safety**
-- TypeScript strict mode enabled
-- All types centralized in `/lib/types`
-- No `any` types allowed
-
-### 3. **Mock Data First**
-- All components work with `useMockData()` out of the box
-- No backend required for development
-- Realistic data generation (Brownian motion)
-
-### 4. **Performance**
-- `useMemo` and `useCallback` for optimization
-- Recharts optimized for 100K+ data points
-- Lazy filtering of visible data
-
-### 5. **Modular & Reusable**
-- Hooks can be extracted and used elsewhere
-- Components have clear, documented props
-- No global state coupling (yet)
-
----
-
-## 📝 Documentation
-
-Every component includes:
-1. **Component file** (`components/features/...`)
-2. **Type definitions** (`lib/types/...`)
-3. **Hooks** (`lib/hooks/...`)
-4. **Playground** (`app/playground/.../`)
-5. **Documentation** (`docs/[component].md`)
-6. **Changelog entry** (`CHANGELOG.md`)
-
-### View Component Docs
-- **Timeline**: `/docs/timeline.md`
-- **All Components**: `/docs/README.md` (TBD)
-
----
-
-## 🚀 Development Workflow
-
-### Adding a New Component
-
-1. **Define Types** → `/lib/types/[component].ts`
-   ```typescript
-   export interface [Component]Props { ... }
-   export interface [Component]Data { ... }
-   ```
-
-2. **Create Hooks** → `/lib/hooks/use[Component].ts`
-   ```typescript
-   export function use[Component](data: T, options: O) { ... }
-   ```
-
-3. **Build Component** → `/components/features/[Component].tsx`
-   ```typescript
-   export function [Component](props: [Component]Props) { ... }
-   ```
-
-4. **Create Playground** → `/app/playground/[component]/page.tsx`
-   ```typescript
-   'use client';
-   export default function [Component]Playground() { ... }
-   ```
-
-5. **Write Docs** → `/docs/[component].md`
-   - Purpose, props, usage examples, performance notes
-
-6. **Update Changelog** → `CHANGELOG.md`
-   - Add entry under `[Unreleased] - Added`
-
----
-
-## 🧪 Testing
-
-### Manual Testing (Playground Routes)
-- Timeline: http://localhost:3000/playground/timeline
-- More coming soon...
-
-### Type Checking
-```bash
-npm run type-check
-```
-
-### Linting
-```bash
-npm run lint
-```
-
----
-
-## 📦 Dependencies
-
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `next` | 16.1.6+ | Framework |
-| `react` | 19.2.4+ | UI library |
-| `recharts` | 3.7.0+ | Data visualization |
-| `tailwindcss` | 4.1.18+ | Styling |
-| `zustand` | 5.0.11+ | State management (optional) |
-| `lucide-react` | 0.563.0+ | Icons |
-| `typescript` | 5.9.3+ | Type safety |
-
----
-
-## 🔮 Roadmap
-
-### Phase 1 (Current Sprint)
-- ✅ Timeline Component
-- [ ] Workflow Canvas
-- [ ] 3D Digital Twin Viewer
-
-### Phase 2
-- [ ] Dashboard Integration
-- [ ] Real Database Connection
-- [ ] Authentication
-- [ ] WebSocket Streaming
-
-### Phase 3
-- [ ] Mobile App
-- [ ] Alert System
-- [ ] Data Export
-- [ ] Performance Optimizations
-
----
-
-## 🛠️ Environment Variables
+## Environment Variables
 
 Copy `.env.example` to `.env.local`:
 
-```bash
-cp .env.example .env.local
+```env
+# Backend API
+NEXT_PUBLIC_API_URL=http://localhost:8000
+
+# Feature flags
+NEXT_PUBLIC_ENABLE_3D_CANVAS=true
+NEXT_PUBLIC_ENABLE_REAL_TIME_STREAMING=true
+NEXT_PUBLIC_MOCK_DATA_MODE=true           # Use mock data without backend
+NEXT_PUBLIC_DEV_MODE=true                 # Skip RunPod wake-up in dev
+
+# Timeline
+NEXT_PUBLIC_TIMELINE_STREAMING_INTERVAL=15000   # ms between data updates
+NEXT_PUBLIC_CHART_ANIMATION_ENABLED=true
 ```
 
-Available variables:
-```env
-NEXT_PUBLIC_API_URL=http://localhost:3000/api
-NEXT_PUBLIC_MOCK_DATA_MODE=true
-NEXT_PUBLIC_TIMELINE_STREAMING_INTERVAL=15000
+Set `NEXT_PUBLIC_DEV_MODE=false` and `NEXT_PUBLIC_MOCK_DATA_MODE=false` for production to connect to the live backend.
+
+---
+
+## Project Structure
+
+```
+frontend/
+├── app/                          # Next.js App Router (pages & layouts only)
+│   ├── page.tsx                 # Main dashboard (auth guard + module router)
+│   ├── layout.tsx               # Root layout
+│   ├── globals.css              # Global styles + Recharts overrides
+│   └── playground/              # Component isolation testing
+│       ├── timeline/            # → /playground/timeline
+│       ├── workflow-builder/    # → /playground/workflow-builder
+│       └── fithub/              # → /playground/fithub
+│
+├── components/                  # UI components (no business logic)
+│   ├── ui/                     # Atomic design system (buttons, badges, etc.)
+│   ├── auth/
+│   │   └── AuthScreen.tsx      # Login form
+│   ├── layout/
+│   │   └── Navbar.tsx          # Top navigation bar
+│   ├── timeline/
+│   │   └── Timeline.tsx        # 4-channel sensor chart
+│   ├── workflow-builder/       # OpsFlow node editor (desktop + mobile)
+│   ├── digital-twin/           # 3D factory scene (Three.js + R3F)
+│   ├── opshub/                 # Work order management
+│   ├── overview/               # Facility KPIs, alerts, metrics
+│   ├── asset-details/          # Equipment detail panel
+│   ├── updates/                # System updates feed
+│   └── shared/                 # Reusable UI (MentionInput, UserAvatar, etc.)
+│
+├── lib/                         # All business logic (no JSX)
+│   ├── types/                  # TypeScript interfaces (source of truth)
+│   │   ├── tfo.ts             # Module, metrics, alerts
+│   │   ├── workflow.ts        # Node types, workflow definitions
+│   │   ├── timeline.ts        # Sensor data, chart config
+│   │   ├── connector.ts       # Connector metadata
+│   │   ├── opshub.ts          # Work orders, assignments
+│   │   └── chat.ts            # Message history
+│   ├── store/                  # Zustand stores (persisted)
+│   │   ├── auth-store.ts      # JWT token + email
+│   │   ├── tfo-store.ts       # Active module, metrics, alerts
+│   │   ├── workflow-store.ts  # Canvas state, nodes, edges
+│   │   ├── timeline-store.ts  # Zoom level, visible range
+│   │   ├── opshub-store.ts    # Work orders, selected task
+│   │   └── screen-context-store.ts  # Screen metadata for AI context
+│   ├── hooks/                  # Custom React hooks
+│   │   ├── useConnectorTimeline.ts  # Fetch telemetry from API
+│   │   ├── useTimeline.ts          # Zoom/pan logic
+│   │   ├── useWorkflowMockData.ts  # Demo workflows
+│   │   ├── useMediaQuery.ts        # Responsive breakpoints
+│   │   └── useDemoMode.ts          # Dev mode toggle
+│   ├── services/               # HTTP clients
+│   │   ├── backend.ts         # apiFetch wrapper + ApiError
+│   │   ├── auth.service.ts
+│   │   ├── telemetry.service.ts
+│   │   ├── connector.service.ts
+│   │   ├── llm.service.ts
+│   │   ├── chat.service.ts
+│   │   └── knowledge-base.service.ts
+│   └── validators/             # Zod schemas
+│       └── workflow.validators.ts
+│
+└── docs/                        # Component documentation
+    ├── README.md               # Documentation index
+    ├── timeline.md
+    ├── workflow-builder.md
+    └── fithub.md
 ```
 
 ---
 
-## 🐛 Troubleshooting
+## Features
 
-### Port 3000 Already in Use
+### Overview Dashboard
+
+Facility-level monitoring at a glance:
+- Real-time KPIs (uptime, efficiency, active alerts)
+- Alert feed (warning / critical severity)
+- Recent workflow activity
+- Quick actions
+
+### Timeline (Sensor Telemetry)
+
+4-channel time-series visualization of industrial sensor data:
+- Temperature, vibration, pressure, humidity
+- 80% historical (solid) + 20% predictive (dashed)
+- Zoom levels: minute → hour → day → week → year
+- Pan navigation with real-time streaming
+- Backed by `/api/v1/telemetry/timeline` with DB-level downsampling
+
+See [`docs/timeline.md`](./docs/timeline.md) for full component docs.
+
+### Workflow Builder (OpsFlow)
+
+Visual workflow editor for industrial automation:
+- **Desktop:** React Flow canvas with drag-drop node palette
+- **Mobile:** Sequential card view optimized for glove-friendly touch
+- **Voice Input:** Speak a workflow → AI generates nodes → user confirms
+- 19 node types: triggers, conditions, inputs, actions, utilities
+- Freemium gating per node (free / pro / enterprise)
+
+See [`docs/workflow-builder.md`](./docs/workflow-builder.md) for full component docs.
+
+### Digital Twin
+
+3D interactive factory scene:
+- Three.js + React Three Fiber scene with camera presets
+- Clickable equipment hotspots with real-time metric overlays
+- `MiniDigitalTwin` for embedded sidebar view
+- `MachineInspector` for detailed equipment properties
+
+See [`docs/digital-twin.md`](./docs/digital-twin.md) for full component docs.
+
+### OpsHub (Work Orders)
+
+Task and work order management:
+- Work order list with status tracking (pending / in-progress / completed)
+- Assignment and priority management
+- Integration-ready with Jira, ServiceNow (via connectors)
+
+### Fithub (Cross-Facility Learning)
+
+GitHub-inspired knowledge sharing:
+- AI-detected anomaly feed with approve/reject/investigate
+- Cross-facility solution sharing (when Munich solves a problem, all plants learn)
+- Workflow repository with stars and forks
+- Changelog timeline of facility updates
+
+See [`docs/fithub.md`](./docs/fithub.md) for full component docs.
+
+---
+
+## State Management
+
+All state is managed with Zustand. Stores use the `persist` middleware to survive page refreshes.
+
+```typescript
+// Pattern used across all stores
+export const useXStore = create<XState>()(
+  persist(
+    (set, get) => ({ ...initialState, ...actions }),
+    { name: 'x_store', partialize: (s) => ({ /* fields to persist */ }) }
+  )
+)
+```
+
+| Store | Persisted | Contents |
+|-------|-----------|----------|
+| `auth-store` | Yes | JWT token, email |
+| `tfo-store` | Yes | Active module, metrics |
+| `workflow-store` | Yes | Canvas nodes, edges, mode |
+| `timeline-store` | Yes | Zoom level, visible range |
+| `opshub-store` | No | Work orders, selected task |
+| `screen-context-store` | No | Screen bounds, AI context |
+
+---
+
+## HTTP Layer
+
+All API calls go through `apiFetch()` in `lib/services/backend.ts`:
+
+```typescript
+// Auto-injects Authorization header
+// Throws ApiError on non-2xx
+// 401 → clears token → reloads to login
+const data = await apiFetch<TelemetryPoint[]>('/telemetry/timeline?minutes=60')
+```
+
+Services are thin wrappers around `apiFetch`:
+
+```typescript
+// lib/services/telemetry.service.ts
+export async function getTimeline(minutes = 60): Promise<TimelinePoint[]> {
+  return apiFetch(`/telemetry/timeline?minutes=${minutes}`)
+}
+```
+
+---
+
+## Architecture Principles
+
+**1. Headless Components** — Logic lives in hooks, components only render. A component should have no `useState` for business logic — that belongs in a hook or store.
+
+**2. Mock Data First** — Every complex component works standalone without a backend. Use `NEXT_PUBLIC_MOCK_DATA_MODE=true` to develop UI independently.
+
+**3. Type Safety** — TypeScript strict mode, no `any`. All shared interfaces live in `lib/types/`. Zod validates all external data.
+
+**4. Responsive / Dual-Mode** — Desktop and mobile share the same Zustand store; only the view layer switches. Detect with `useMediaQuery('(max-width: 768px)')`.
+
+**5. Performance** — `useMemo`/`useCallback` for chart transforms. `React.memo` for list items. Dynamic imports for heavy components (3D canvas, workflow editor).
+
+---
+
+## Development Scripts
+
+```bash
+npm run dev          # Next.js dev server (port 3000, Turbopack)
+npm run build        # Production build
+npm start            # Production server
+npm run type-check   # TypeScript type checking
+npm run lint         # ESLint
+npm test             # Vitest (run once)
+npm run test:watch   # Vitest watch mode
+```
+
+---
+
+## Adding a New Feature
+
+Follow the Definition of Done:
+
+1. **Types** → `lib/types/[feature].ts`
+2. **Hook** → `lib/hooks/use[Feature].ts` (with mock data support)
+3. **Component** → `components/[feature]/[Feature].tsx`
+4. **Playground** → `app/playground/[feature]/page.tsx`
+5. **Docs** → `docs/[feature].md` (Purpose, Props, Examples)
+6. **Changelog** → `CHANGELOG.md` entry
+
+---
+
+## Documentation
+
+- [Timeline](./docs/timeline.md) — 4-channel sensor chart
+- [Workflow Builder](./docs/workflow-builder.md) — OpsFlow node editor
+- [Digital Twin](./docs/digital-twin.md) — 3D factory scene
+- [Fithub](./docs/fithub.md) — Cross-facility knowledge sharing
+- [API Services](./docs/connectors.md) — HTTP layer and connector integration
+- [All Docs Index](./docs/README.md)
+
+---
+
+## Deployment (Vercel)
+
+1. Push to `main` branch — Vercel auto-deploys.
+2. Set environment variable in Vercel dashboard:
+   ```
+   NEXT_PUBLIC_API_URL=https://abc123.proxy.runpod.net/api/v1
+   NEXT_PUBLIC_DEV_MODE=false
+   NEXT_PUBLIC_MOCK_DATA_MODE=false
+   ```
+3. CORS: make sure `ALLOWED_ORIGINS` on the backend includes your Vercel URL.
+
+---
+
+## Troubleshooting
+
+**Port 3000 in use:**
 ```bash
 npm run dev -- -p 3001
 ```
 
-### Type Errors
+**Type errors:**
 ```bash
 npm run type-check
 ```
 
-### Build Issues
+**Stale build cache:**
 ```bash
 rm -rf .next node_modules
-npm install
-npm run build
+npm install && npm run build
 ```
 
----
-
-## 📚 Additional Resources
-
-- [Next.js Documentation](https://nextjs.org/docs)
-- [Tailwind CSS](https://tailwindcss.com)
-- [Recharts](https://recharts.org)
-- [TypeScript](https://www.typescriptlang.org)
-
----
-
-## 📄 License
-
-MIT License - See LICENSE file for details
-
----
-
-## 👨‍💼 Architecture Lead
-
-Senior Full Stack Architect
-TRIPOLAR Industries
-Sprint: 5 Days Sprint
-
-**Created**: 2024-02-06
-**Last Updated**: 2024-02-06
+**Charts not rendering in production:** Check `NEXT_PUBLIC_CHART_ANIMATION_ENABLED` and ensure Recharts is not tree-shaken (it's a client component).

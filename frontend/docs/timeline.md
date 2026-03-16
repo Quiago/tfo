@@ -17,13 +17,13 @@ The **Timeline** is a financial-style, real-time data visualization component de
 ## File Structure
 
 ```
-components/
-  └── features/
-      └── Timeline.tsx          # Main component
+components/timeline/
+  └── Timeline.tsx              # Main component
 
 lib/
   ├── hooks/
-  │   ├── useTimeline.ts        # Timeline logic and zoom handling
+  │   ├── useTimeline.ts        # Zoom/pan logic (headless)
+  │   ├── useConnectorTimeline.ts  # Fetches data from /telemetry/timeline API
   │   └── useMockData.ts        # Mock data generation with streaming
   └── types/
       └── timeline.ts           # TypeScript interfaces
@@ -33,6 +33,23 @@ app/
       └── timeline/
           └── page.tsx          # Playground testing page
 ```
+
+### API Hook: useConnectorTimeline
+
+For production data (real backend), use `useConnectorTimeline` instead of `useMockData`:
+
+```typescript
+import { useConnectorTimeline } from '@/lib/hooks/useConnectorTimeline'
+
+const { data, isLoading, error } = useConnectorTimeline({
+  minutes: 60,
+  maxPoints: 500,
+  connectorId: 'abc123',           // optional
+  refreshInterval: 15000,          // ms, default 15s
+})
+```
+
+This hook calls `GET /api/v1/telemetry/timeline` and maps the response to `TimelineDataPoint[]` format.
 
 ---
 

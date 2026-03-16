@@ -1,328 +1,103 @@
-# TRIPOLAR Documentation Index
+# TFO Frontend — Documentation Index
 
-Complete technical documentation for the TRIPOLAR Industrial Digital Twin Platform.
+Technical documentation for every feature in the TFO frontend.
+
+---
 
 ## Components
 
-### [Timeline](./timeline.md) ✅
-**Status**: Stable | **Version**: 0.1.0
+### [Timeline](./timeline.md) — Sensor Telemetry Chart
+4-channel time-series visualization. Historical data (solid) + predictive (dashed) with confidence intervals. Zoom/pan, real-time streaming, DB-level downsampling.
+- Props: `TimelineProps`
+- Hooks: `useTimeline`, `useConnectorTimeline`
+- Playground: `/playground/timeline`
 
-Financial-style time series visualization with historical data, predictions, and confidence intervals.
+### [Workflow Builder](./workflow-builder.md) — OpsFlow Node Editor
+Dual-mode industrial workflow editor: React Flow canvas (desktop) + sequential cards (mobile). Voice-to-workflow via Whisper ASR + LLM intent parsing.
+- Store: `useWorkflowStore`
+- Node types: 19 across 5 categories
+- Playground: `/playground/workflow-builder`
 
-- **Props**: `TimelineProps` interface
-- **Hooks**: `useTimeline`, `useMockData`
-- **Features**: Zoom levels, pan navigation, real-time streaming
-- **Performance**: Tested with 100K+ data points
-- **Playground**: `/app/playground/timeline`
+### [Digital Twin](./digital-twin.md) — 3D Factory Scene
+Interactive Three.js factory with clickable equipment hotspots, real-time metric overlays, and camera presets. Embedded via `MiniDigitalTwin` or full-screen via `FactoryScene`.
+- Playground: `/playground/digital-twin`
 
-**Key Metrics**:
-- Data Points Supported: Up to 138K (1 year at 15-min intervals)
-- Render Time: 150-450ms depending on data volume
-- FPS: 45-60
+### [Fithub](./fithub.md) — Cross-Facility Learning
+GitHub-inspired anomaly and knowledge feed. AI-detected anomaly cards (approve/reject/investigate), cross-facility workflow repos, changelog timeline.
+- Playground: `/playground/fithub`
 
----
-
-## Hooks
-
-### Data Management
-- **`useMockData(autoStream?)`**: Realistic data generation with Brownian motion
-  - Generates 90 days historical + 30 days predictions
-  - Auto-streaming mode with 15-second intervals
-  - Confidence interval calculation
-
-- **`useTimeline(data, predictions, options?)`**: Timeline logic management
-  - Zoom level handling (minute, hour, day, week, year)
-  - Pan/navigation with offset tracking
-  - Visible data range calculation
-  - Metrics computation (min, max, mean, stdDev)
-
----
-
-## Types & Interfaces
-
-### Core Types (`lib/types/timeline.ts`)
-- `TimelineZoomLevel`: Zoom level enum type
-- `TimelineDataPoint`: Historical data structure
-- `TimelinePredictionPoint`: Prediction with confidence bounds
-- `TimelineRange`: Time range specification
-- `TimelineConfig`: Configuration interface
-- `TimelineState`: Complete state structure
-- `TimelineMetrics`: Statistical metrics
-
-### Usage
-```typescript
-import type { TimelineDataPoint, TimelineZoomLevel } from '@/lib/types';
-```
-
----
-
-## Configuration
-
-### Constants (`lib/utils/constants.ts`)
-Centralized single source of truth for:
-- Zoom window sizes
-- Color scheme
-- Default dimensions
-- API endpoints
-- Feature flags
-
-### Environment Variables (`.env.local`)
-```env
-NEXT_PUBLIC_API_URL=http://localhost:3000/api
-NEXT_PUBLIC_MOCK_DATA_MODE=true
-NEXT_PUBLIC_TIMELINE_STREAMING_INTERVAL=15000
-NEXT_PUBLIC_ENABLE_3D_CANVAS=true
-```
+### [Connectors & API Services](./connectors.md) — HTTP Layer
+`apiFetch` wrapper with auto-auth injection, `ApiError` typed exceptions, and per-module service files. OPC UA, MQTT, REST connector management.
 
 ---
 
 ## Architecture Patterns
 
-### 1. Headless Component Design
-- **Logic Layer**: Custom hooks (`useTimeline`, `useMockData`)
-- **Presentation Layer**: React components (`Timeline`)
-- **Types Layer**: Centralized in `/lib/types`
+### Headless Hook-Component Split
+Logic lives in hooks. Components only render. This means:
+- `components/[feature]/[Feature].tsx` — render only, no `useState` for business logic
+- `lib/hooks/use[Feature].ts` — all state, transforms, derived values
+- Same hook can power both the component and the playground
 
-### 2. Mock Data First
-- All components work standalone with `useMockData()`
-- Realistic data generation using Brownian motion
-- No backend required for development
+### Mock Data First
+Every complex component has a `useMockData` variant. Set `NEXT_PUBLIC_MOCK_DATA_MODE=true` to develop without a running backend.
 
-### 3. Type Safety
-- TypeScript strict mode enabled
-- No `any` types allowed
-- Discriminating unions for state
+### Zustand Stores (Persisted)
+Each feature domain has a Zustand store with `persist` middleware. Stores are mode-agnostic — both desktop and mobile views read from the same store.
 
-### 4. Performance Optimization
-- `useMemo` and `useCallback` for expensive operations
-- Data filtering for visible range only
-- Recharts optimization for large datasets
+### Type Safety Rules
+- No `any` types — ever.
+- All shared interfaces in `lib/types/`.
+- Zod validates everything coming from outside (API responses, voice intent JSON, user input).
 
 ---
 
-## Development Workflow
+## Definition of Done
 
-### Adding a New Component
+Before merging any new feature:
 
-1. **Define Types**
-   ```
-   lib/types/[component].ts
-   ```
-   - Interfaces for props
-   - Data structures
-   - Enums for type safety
-
-2. **Create Hooks**
-   ```
-   lib/hooks/use[Component].ts
-   ```
-   - Business logic
-   - Data transformations
-   - State management
-
-3. **Build Component**
-   ```
-   components/features/[Component].tsx
-   ```
-   - UI rendering
-   - Event handling
-   - Responsive design
-
-4. **Create Playground**
-   ```
-   app/playground/[component]/page.tsx
-   ```
-   - Interactive testing
-   - Example usage
-   - Control panels
-
-5. **Write Documentation**
-   ```
-   docs/[component].md
-   ```
-   - Purpose and features
-   - Props and interfaces
-   - Usage examples
-   - Performance notes
-
-6. **Update Changelog**
-   ```
-   CHANGELOG.md
-   ```
-   - Add entry under `[Unreleased] - Added`
+- [ ] Code: component + hook created
+- [ ] Playground: `/app/playground/[feature]/page.tsx`
+- [ ] Docs: `/docs/[feature].md` with Purpose, Props/Schema, Example
+- [ ] Changelog: entry in `CHANGELOG.md`
+- [ ] Type check passes: `npm run type-check`
+- [ ] Lint passes: `npm run lint`
 
 ---
 
-## Project Structure Reference
+## Development Guide
 
-```
-tripolar/
-├── app/                          # Next.js App Router
-│   ├── page.tsx                 # Home page
-│   ├── layout.tsx               # Root layout
-│   ├── globals.css              # Global styles
-│   └── playground/              # Component testing routes
-│       └── timeline/
-│           └── page.tsx         # Timeline playground
-│
-├── components/                   # Reusable UI components
-│   ├── features/                # Complex components
-│   │   ├── Timeline.tsx
-│   │   └── index.ts            # Central exports
-│   └── ui/                      # Atomic design system (future)
-│
-├── lib/                         # Core business logic
-│   ├── hooks/                   # Custom React hooks
-│   │   ├── useTimeline.ts
-│   │   ├── useMockData.ts
-│   │   └── index.ts
-│   ├── types/                   # TypeScript interfaces
-│   │   ├── timeline.ts
-│   │   └── index.ts
-│   └── utils/                   # Helper functions
-│       └── constants.ts
-│
-├── docs/                        # Technical documentation
-│   ├── README.md               # This file
-│   └── timeline.md             # Component documentation
-│
-├── public/                      # Static assets
-├── styles/                      # Additional CSS
-├── CHANGELOG.md                # Version history
-├── README.md                   # Project overview
-└── package.json               # Dependencies
-```
+### Adding a Component
+
+1. Define types in `lib/types/[feature].ts`
+2. Create hook in `lib/hooks/use[Feature].ts`
+3. Build component in `components/[folder]/[Feature].tsx`
+4. Add playground in `app/playground/[feature]/page.tsx`
+5. Write docs in `docs/[feature].md`
+6. Update `CHANGELOG.md`
+
+### Adding an API Service
+
+1. Add typed function to `lib/services/[module].service.ts`
+2. Use `apiFetch<ResponseType>('/path')` — never `fetch()` directly
+3. Add Zod schema for the response if it comes from outside (LLM output, user upload)
 
 ---
 
-## Performance Guidelines
+## Useful Commands
 
-### Data Size Recommendations
-
-| Use Case | Data Points | Interval | Render Time |
-|----------|------------|----------|------------|
-| Real-time monitoring | 2,688 | 15 min | 150ms |
-| Daily analysis | 11,520 | 5 min | 250ms |
-| Historical analysis | 138,240 | 5 min | 450ms |
-
-### Optimization Tips
-
-1. **Use visible data filtering** - Only render data within `visibleRange`
-2. **Memoize calculations** - Use `useMemo` for expensive operations
-3. **Lazy load** - Load data in chunks, not all at once
-4. **Compress data** - Aggregate old data into hourly/daily points
-5. **Disable animations** - Set `ENABLE_ANIMATIONS=false` for large datasets
-
----
-
-## Testing Strategy
-
-### Manual Testing
-- **Playground Routes**: `/app/playground/[component]`
-- **Visual Testing**: Screenshots for layout verification
-- **Performance Testing**: Monitor render times and FPS
-
-### Automated Testing (Planned)
-- Unit tests for hooks
-- Integration tests for components
-- E2E tests for workflows
-
----
-
-## Debugging Tips
-
-### TypeScript Errors
 ```bash
-npm run type-check
-```
-
-### Build Issues
-```bash
-rm -rf .next node_modules
-npm install
-npm run build
-```
-
-### Port Already in Use
-```bash
-npm run dev -- -p 3001
-```
-
-### Debug Mode
-```bash
-DEBUG=* npm run dev
+npm run dev           # Dev server (http://localhost:3000)
+npm run type-check    # TypeScript validation
+npm run lint          # ESLint
+npm test              # Vitest
 ```
 
 ---
 
-## Browser Compatibility
+## Related
 
-### Supported
-- Chrome 90+
-- Firefox 88+
-- Safari 14+
-- Edge 90+
-
-### Not Supported
-- IE 11 (No ES2020 support)
-- Mobile browsers < 2021
-
----
-
-## Related Documents
-
-- **[Main README](../README.md)**: Project overview and quick start
-- **[CHANGELOG](../CHANGELOG.md)**: Version history and releases
-- **[CLAUDE.md](../CLAUDE.md)**: Project context and guidelines
-- **[.env.example](../.env.example)**: Environment configuration template
-
----
-
-## Contributing
-
-### Code Standards
-1. **TypeScript**: Use strict mode, no `any` types
-2. **Components**: Headless design with separated logic
-3. **Documentation**: Update docs and changelog with changes
-4. **Testing**: Add playground routes for visual testing
-
-### Pull Request Checklist
-- [ ] Types defined in `/lib/types`
-- [ ] Component/hook created in appropriate folder
-- [ ] Playground route added for testing
-- [ ] Documentation updated
-- [ ] Changelog entry added
-- [ ] Type checking passes: `npm run type-check`
-- [ ] Linting passes: `npm run lint`
-
----
-
-## FAQ
-
-### Q: How do I add a new zoom level?
-A: Edit `ZOOM_WINDOWS` in `lib/utils/constants.ts` and update `TimelineZoomLevel` type in `lib/types/timeline.ts`.
-
-### Q: How do I customize colors?
-A: Update `COLORS` in `lib/utils/constants.ts` or modify Recharts styles in `app/globals.css`.
-
-### Q: Can I use real data instead of mock?
-A: Yes, replace `useMockData()` with your own hook that fetches data from an API.
-
-### Q: How do I improve performance with large datasets?
-A: See "Performance Guidelines" section above for optimization tips.
-
----
-
-## Support & Resources
-
-- **TypeScript**: https://www.typescriptlang.org
-- **Next.js**: https://nextjs.org/docs
-- **React**: https://react.dev
-- **Recharts**: https://recharts.org
-- **Tailwind CSS**: https://tailwindcss.com
-
----
-
-**Last Updated**: 2024-02-06
-**Status**: Stable
-**Version**: 0.1.0
+- [Main Frontend README](../README.md)
+- [Backend README](../../backend/README.md)
+- [CHANGELOG](../CHANGELOG.md)
+- [CLAUDE.md](../CLAUDE.md) — coding standards & architecture guidelines

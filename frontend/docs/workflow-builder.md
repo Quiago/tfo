@@ -111,7 +111,7 @@ Each node has `availableIn: ['free' | 'pro' | 'enterprise']` for freemium gating
 ## Files
 
 ```
-/components/features/workflow-builder/
+/components/workflow-builder/
   WorkflowBuilder.tsx        -- Main responsive wrapper
   WorkflowCanvas.tsx         -- React Flow canvas (desktop)
   WorkflowCardView.tsx       -- Sequential cards (mobile)
