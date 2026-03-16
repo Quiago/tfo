@@ -26,7 +26,7 @@ cd "$BACKEND_DIR"
 if ! command -v uv &>/dev/null; then
   echo "[start] Instalando uv..."
   curl -LsSf https://astral.sh/uv/install.sh | sh
-  export PATH="/root/.local/bin:$PATH"
+  source $HOME/.local/bin/env   
 fi
 
 # ── Sincronizar dependencias ──────────────────────────────────────────────────

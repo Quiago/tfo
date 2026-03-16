@@ -15,11 +15,13 @@ import os
 import torch
 
 logger = logging.getLogger(__name__)
+torch.cuda.empty_cache()
 
 # Override via MODELS_DIR env var to point at a RunPod network volume,
 # e.g. MODELS_DIR=/runpod-volume/models
 MODELS_DIR = Path(os.environ.get("MODELS_DIR", "models"))
 _CUDA_AVAILABLE = torch.cuda.is_available()
+
 
 _VLLM_AVAILABLE = False
 try:
@@ -97,18 +99,29 @@ class VLLMEngine:
     async def _load_vllm(self, model_id: str, dtype: str) -> None:
         """Carga el modelo con vLLM AsyncLLMEngine (GPU)."""
         from vllm import AsyncEngineArgs, AsyncLLMEngine
+        os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+        # En _load_vllm(), antes de args:
+        if torch.cuda.is_available():
+            free, total = torch.cuda.mem_get_info()
+            logger.info(f"[Engine] VRAM libre antes de cargar: {free/1024**3:.1f}/{total/1024**3:.1f} GiB")
 
         model_path = MODELS_DIR / model_id
         num_gpus = max(torch.cuda.device_count(), 1)
         args = AsyncEngineArgs(
             model=str(model_path),
             dtype=dtype,
-            gpu_memory_utilization=0.9,
+            gpu_memory_utilization=0.75,
+            max_model_len=32768,
+            enforce_eager=True,  
             tensor_parallel_size=num_gpus,
             trust_remote_code=True,
         )
         logger.info(f"[Engine] Cargando con vLLM en {num_gpus} GPU(s): {model_id}")
         self._vllm_engine = await asyncio.to_thread(AsyncLLMEngine.from_engine_args, args)
+
+        if hasattr(self._vllm_engine, 'engine_core'):
+            torch.cuda.empty_cache() 
+
         self._current_model_id = model_id
         logger.info(f"[Engine] Listo (vLLM): {model_id}")
 
