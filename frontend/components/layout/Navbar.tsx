@@ -1,6 +1,7 @@
 'use client'
 
 import { useAuthStore } from '@/lib/store/auth-store'
+import { resolveAssetMeta } from '@/lib/constants/asset-meta'
 import { type FacilityLocation } from '@/lib/store/tfo-store'
 import type { TfoModule } from '@/lib/types/tfo'
 import nav from '@/styles/navbar/navbar.module.css'
@@ -56,16 +57,20 @@ export function Navbar({
     locations,
     activeLocation,
     onLocationChange,
+    focusedAsset,
 }: {
     activeModule: TfoModule
     onModuleChange: (mod: TfoModule) => void
     locations: FacilityLocation[]
     activeLocation: FacilityLocation
     onLocationChange: (id: string) => void
+    /** Mesh/asset ID currently in expand view — shows context label next to Search */
+    focusedAsset?: string | null
 }) {
     const [dropdownOpen, setDropdownOpen] = useState(false)
     const [userMenuOpen, setUserMenuOpen] = useState(false)
-    const { email, clear } = useAuthStore()
+    const { email, name, role, initials, clear } = useAuthStore()
+    const assetMeta = focusedAsset ? resolveAssetMeta(focusedAsset) : null
 
     return (
         <nav className={nav.navbar}>
@@ -105,6 +110,19 @@ export function Navbar({
                 <span>Search</span>
             </button>
 
+            {/* Focused Asset Context Label — only visible in expand/details view */}
+            {assetMeta && (
+                <div className="flex items-center gap-2 px-4 h-10 rounded-[var(--tp-radius-pill)] border border-[var(--tp-stroke)] bg-[var(--tp-bg-pill)] whitespace-nowrap" style={{ borderWidth: 'var(--tp-stroke-width)' }}>
+                    <MapPin size={13} className="text-[var(--tp-text-muted)] flex-shrink-0" />
+                    <span className="font-semibold text-[var(--tp-text-heading)]">{assetMeta.displayName}</span>
+                    <span className="text-[var(--tp-stroke)] select-none">·</span>
+                    <span className="text-[var(--tp-text-muted)] font-medium">{assetMeta.cluster}</span>
+                    <span className="text-[var(--tp-stroke)] select-none">·</span>
+                    <span className="text-[var(--tp-text-muted)] font-medium">{assetMeta.productionLine}</span>
+                    <span className="text-[var(--tp-stroke)] select-none">·</span>
+                    <span className="text-[var(--tp-text-muted)] font-medium">{assetMeta.floor}</span>
+                </div>
+            )}
 
             {/* Spacer */}
             <div className={nav.spacer} />
@@ -151,21 +169,31 @@ export function Navbar({
                     onClick={() => setUserMenuOpen(!userMenuOpen)}
                     className={nav.userSection}
                 >
-                    <UserAvatar className={nav.userAvatar} />
-                    <span className={nav.userName}>{email?.split('@')[0] ?? 'User'}</span>
+                    {/* Avatar initials circle */}
+                    <span className="w-7 h-7 rounded-full bg-indigo-600 text-white text-[11px] font-bold flex items-center justify-center flex-shrink-0">
+                        {initials}
+                    </span>
+                    <span className="flex flex-col items-start leading-none">
+                        <span className={nav.userName}>{name}</span>
+                        <span className="text-[10px] text-zinc-400 font-normal mt-0.5">{role}</span>
+                    </span>
                     <ChevronDown size={14} className={`${nav.userChevron} transition-transform ${userMenuOpen ? 'rotate-180' : ''}`} />
                 </button>
 
                 {userMenuOpen && (
                     <>
                         <div className="fixed inset-0 z-40" onClick={() => setUserMenuOpen(false)} />
-                        <div className="absolute top-full right-0 mt-2 w-48 rounded-xl border border-zinc-200 bg-white shadow-xl overflow-hidden z-50 py-1">
-                            {email && (
-                                <div className="px-4 py-2.5 border-b border-zinc-100">
-                                    <p className="text-xs text-zinc-400">Signed in as</p>
-                                    <p className="text-sm text-zinc-700 font-medium truncate">{email}</p>
+                        <div className="absolute top-full right-0 mt-2 w-52 rounded-xl border border-zinc-200 bg-white shadow-xl overflow-hidden z-50 py-1">
+                            <div className="px-4 py-3 border-b border-zinc-100 flex items-center gap-3">
+                                <span className="w-9 h-9 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">
+                                    {initials}
+                                </span>
+                                <div className="min-w-0">
+                                    <p className="text-sm text-zinc-800 font-semibold truncate">{name}</p>
+                                    <p className="text-xs text-zinc-400 truncate">{role}</p>
+                                    {email && <p className="text-[11px] text-zinc-400 truncate mt-0.5">{email}</p>}
                                 </div>
-                            )}
+                            </div>
                             <button
                                 onClick={() => { clear(); setUserMenuOpen(false); }}
                                 className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2.5 transition-colors"

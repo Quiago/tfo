@@ -160,6 +160,7 @@ function Dashboard() {
                 locations={locations}
                 activeLocation={activeLocation}
                 onLocationChange={setActiveLocation}
+                focusedAsset={viewMode === 'details' ? selectedAsset : null}
             />
 
             {/* ── BODY ── */}
