@@ -150,6 +150,62 @@
     line-height: 1.4;
 }
 
+/* Optimization Insight Box */
+.optimizationContainer {
+    background: #F0FDF4;
+    border: 1px solid #86EFAC;
+    border-radius: 12px;
+    margin: 0 20px 16px 20px;
+    padding: 12px;
+}
+
+.optimizationHeader {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.optimizationTitle {
+    color: #15803D;
+    font-weight: 700;
+    font-size: 12px;
+    text-transform: uppercase;
+}
+
+.optimizationText {
+    font-size: 11px;
+    color: #166534;
+    line-height: 1.4;
+    margin-bottom: 10px;
+}
+
+.optimizationMetrics {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.optimizationMetric {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.optimizationMetricLabel {
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: #16A34A;
+    letter-spacing: 0.04em;
+}
+
+.optimizationMetricValue {
+    font-size: 13px;
+    font-weight: 700;
+    color: #15803D;
+}
+
 /* Action Buttons Row */
 .actions {
     display: grid;

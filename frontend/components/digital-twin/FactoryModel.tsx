@@ -20,8 +20,10 @@ interface FactoryModelProps {
     url: string
     onMeshCount?: (count: number) => void
     onMeshClick?: (event: MeshClickEvent) => void
-    /** Mesh name pattern to flash red. null = no alert */
+    /** Mesh name pattern to flash. null = no alert */
     alertMeshPattern?: string | null
+    /** Controls flash color: 'anomaly' = red, 'optimization' = green */
+    alertMode?: 'anomaly' | 'optimization'
     /** Called once when alert meshes are found, with position info for fly-to */
     onAlertMeshFound?: (info: AlertMeshInfo) => void
     /** Mesh name to isolate. If set, all other meshes are hidden. */
@@ -31,6 +33,8 @@ interface FactoryModelProps {
 const HIGHLIGHT_EMISSIVE = new THREE.Color(0x442200)
 const ALERT_RED = new THREE.Color(0xff0000)
 const ALERT_DARK = new THREE.Color(0x330000)
+const OPTIM_GREEN = new THREE.Color(0x00ff44)
+const OPTIM_DARK = new THREE.Color(0x003311)
 
 /**
  * Checks if a mesh name belongs to a KUKA robot arm.
@@ -74,6 +78,7 @@ export function FactoryModel({
     onMeshCount,
     onMeshClick,
     alertMeshPattern,
+    alertMode = 'anomaly',
     onAlertMeshFound,
     isolatedMeshName,
 }: FactoryModelProps) {
@@ -83,6 +88,10 @@ export function FactoryModel({
     const originalMaterialsRef = useRef<WeakMap<THREE.Mesh, THREE.Material | THREE.Material[]>>(
         new WeakMap()
     )
+
+    // Keep alertMode in a ref so useFrame always reads the latest value without stale closure
+    const alertModeRef = useRef<'anomaly' | 'optimization'>(alertMode)
+    useEffect(() => { alertModeRef.current = alertMode }, [alertMode])
 
     // Alert flash state
     const alertMeshesRef = useRef<THREE.Mesh[]>([])
@@ -234,18 +243,22 @@ export function FactoryModel({
         })
     }, [alertMeshPattern, scene, onAlertMeshFound])
 
-    // Animate the flash — police siren strobe
+    // Animate the flash — strobe (red for anomaly, green for optimization)
     useFrame(({ clock }) => {
         if (alertMeshesRef.current.length === 0) return
         const t = clock.getElapsedTime()
-        // Fast strobe: sin wave at ~3Hz, clamped to sharp on/off
-        const pulse = Math.sin(t * 6 * Math.PI) > 0 ? 1 : 0
+        const isOptim = alertModeRef.current === 'optimization'
+        // Fast strobe for anomaly (3 Hz), slower pulse for optimization (1.5 Hz)
+        const freq = isOptim ? 3 : 6
+        const pulse = Math.sin(t * freq * Math.PI) > 0 ? 1 : 0
         const intensity = pulse * 2.5
+        const colorOn = isOptim ? OPTIM_GREEN : ALERT_RED
+        const colorOff = isOptim ? OPTIM_DARK : ALERT_DARK
 
         for (const mesh of alertMeshesRef.current) {
             const mat = alertClonedMatsRef.current.get(mesh)
             if (mat) {
-                mat.emissive = pulse > 0.5 ? ALERT_RED : ALERT_DARK
+                mat.emissive = pulse > 0.5 ? colorOn : colorOff
                 mat.emissiveIntensity = intensity
             }
         }

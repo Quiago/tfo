@@ -1,170 +1,100 @@
 'use client'
 
 import s from '@/styles/overview-expanded/expanded.module.css'
-import type { LucideIcon } from 'lucide-react'
-import {
-    Activity,
-    BookOpen,
-    ChevronDown,
-    ChevronRight,
-    FileText,
-    Home,
-    Radio,
-    ScrollText,
-    Users,
-    Workflow,
-} from 'lucide-react'
-import { useState } from 'react'
+import { SECTIONS } from '@/lib/constants/asset-tree-sections'
+import type { SectionId } from '@/lib/types/asset-tree'
 
-interface SectionNode {
-    id: string
-    label: string
-    icon: LucideIcon
-    children: { id: string; label: string }[]
+interface AssetTreeProps {
+    /** Currently highlighted section (shows active state) */
+    activeSectionId?: SectionId | null
+    /** Called when the user clicks a top-level section row */
+    onSectionClick: (sectionId: SectionId) => void
+    /** When true, highlights Workflows with a pulsing green AI badge */
+    highlightWorkflows?: boolean
 }
-
-const SECTIONS: SectionNode[] = [
-    {
-        id: 'home',
-        label: 'Home',
-        icon: Home,
-        children: [
-            { id: 'h_1', label: 'Overview' },
-            { id: 'h_2', label: 'Quick Actions' },
-            { id: 'h_3', label: 'Recent Activity' },
-        ],
-    },
-    {
-        id: 'people',
-        label: 'People',
-        icon: Users,
-        children: [
-            { id: 'p_1', label: 'Carlos M. — Shift Lead' },
-            { id: 'p_2', label: 'Ana R. — Maintenance Tech' },
-            { id: 'p_3', label: 'David L. — Operator' },
-        ],
-    },
-    {
-        id: 'workflows',
-        label: 'Workflows',
-        icon: Workflow,
-        children: [
-            { id: 'wf_1', label: 'Vibration Calibration' },
-            { id: 'wf_2', label: 'Lubrication Routine' },
-            { id: 'wf_3', label: 'Firmware Update v4.2' },
-        ],
-    },
-    {
-        id: 'events',
-        label: 'Events',
-        icon: Activity,
-        children: [
-            { id: 'ev_1', label: 'Alert: Axis 3 vibration spike' },
-            { id: 'ev_2', label: 'Maintenance completed' },
-            { id: 'ev_3', label: 'Shift handover logged' },
-        ],
-    },
-    {
-        id: 'sensors',
-        label: 'Sensors',
-        icon: Radio,
-        children: [
-            { id: 'sn_1', label: 'Vibration — 2.7 mm/s' },
-            { id: 'sn_2', label: 'Temperature — 29.3 °C' },
-            { id: 'sn_3', label: 'Pressure — 6.8 bar' },
-        ],
-    },
-    {
-        id: 'logs',
-        label: 'Logs',
-        icon: ScrollText,
-        children: [
-            { id: 'lg_1', label: '10:42 — Motor start cycle #1204' },
-            { id: 'lg_2', label: '10:38 — Param change: speed +5%' },
-            { id: 'lg_3', label: '10:15 — Self-check passed' },
-        ],
-    },
-    {
-        id: 'docs',
-        label: 'Documentation',
-        icon: BookOpen,
-        children: [
-            { id: 'dc_1', label: 'KR120 Operation Manual' },
-            { id: 'dc_2', label: 'Electrical Schematics v2.1' },
-            { id: 'dc_3', label: 'Safety Procedures (LOTO)' },
-        ],
-    },
-]
 
 export function AssetTree({
-    selectedAssetId,
-    onSelect,
-}: {
-    selectedAssetId?: string
-    onSelect: (id: string) => void
-}) {
+    activeSectionId,
+    onSectionClick,
+    highlightWorkflows = false,
+}: AssetTreeProps) {
     return (
         <div className="h-full flex flex-col bg-transparent">
-            <div className={s.treeHeader}>
-                Explorer
-            </div>
+            <div className={s.treeHeader}>Explorer</div>
             <div className="flex-1 overflow-auto py-2 space-y-0.5">
-                {SECTIONS.map((section) => (
-                    <SectionRow
-                        key={section.id}
-                        section={section}
-                        selectedId={selectedAssetId}
-                        onSelect={onSelect}
-                    />
-                ))}
-            </div>
-        </div>
-    )
-}
+                {SECTIONS.map((section) => {
+                    const isWorkflowsHighlighted = section.id === 'workflows' && highlightWorkflows
+                    const isActive = activeSectionId === section.id
+                    const Icon = section.icon
 
-function SectionRow({
-    section,
-    selectedId,
-    onSelect,
-}: {
-    section: SectionNode
-    selectedId?: string
-    onSelect: (id: string) => void
-}) {
-    const [expanded, setExpanded] = useState(false)
-    const Icon = section.icon
-
-    return (
-        <div>
-            <button
-                onClick={() => setExpanded(!expanded)}
-                className={s.treeItem}
-                style={{ width: 'calc(100% - 8px)' }}
-            >
-                {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                <Icon size={14} style={{ opacity: 0.7 }} />
-                <span>{section.label}</span>
-                <span className="ml-auto text-[10px] opacity-60">{section.children.length}</span>
-            </button>
-
-            {expanded && (
-                <div className="ml-3 border-l border-zinc-300 dark:border-zinc-700 pl-1 my-1">
-                    {section.children.map((item) => {
-                        const isSelected = selectedId === item.id
-                        return (
-                            <button
-                                key={item.id}
-                                onClick={() => onSelect(item.id)}
-                                className={`${isSelected ? s.treeSubItemActive : s.treeSubItem}`}
-                                style={{ width: 'calc(100% - 8px)' }}
+                    return (
+                        <button
+                            key={section.id}
+                            onClick={() => onSectionClick(section.id)}
+                            className={s.treeItem}
+                            style={{
+                                width: 'calc(100% - 8px)',
+                                ...(isActive
+                                    ? {
+                                          background: 'rgba(37, 99, 235, 0.08)',
+                                          border: '1px solid rgba(37, 99, 235, 0.25)',
+                                          borderRadius: '6px',
+                                      }
+                                    : {}),
+                                ...(isWorkflowsHighlighted
+                                    ? {
+                                          background: 'rgba(22, 163, 74, 0.08)',
+                                          border: '1px solid rgba(22, 163, 74, 0.3)',
+                                          borderRadius: '6px',
+                                          boxShadow: '0 0 0 2px rgba(22, 163, 74, 0.15)',
+                                      }
+                                    : {}),
+                            }}
+                        >
+                            <Icon
+                                size={14}
+                                style={{
+                                    opacity: isWorkflowsHighlighted ? 1 : 0.7,
+                                    color: isWorkflowsHighlighted
+                                        ? '#16a34a'
+                                        : isActive
+                                        ? 'var(--tp-accent-blue)'
+                                        : undefined,
+                                }}
+                            />
+                            <span
+                                style={{
+                                    color: isWorkflowsHighlighted
+                                        ? '#15803d'
+                                        : isActive
+                                        ? 'var(--tp-accent-blue)'
+                                        : undefined,
+                                    fontWeight: isWorkflowsHighlighted || isActive ? 600 : undefined,
+                                }}
                             >
-                                <FileText size={11} className="flex-shrink-0" />
-                                <span className="truncate">{item.label}</span>
-                            </button>
-                        )
-                    })}
-                </div>
-            )}
+                                {section.label}
+                            </span>
+
+                            {isWorkflowsHighlighted ? (
+                                <span className="ml-auto flex items-center gap-1.5">
+                                    <span
+                                        className="animate-pulse inline-block w-2 h-2 rounded-full bg-green-500"
+                                        style={{ boxShadow: '0 0 6px rgba(34, 197, 94, 0.8)' }}
+                                    />
+                                    <span
+                                        className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                                        style={{ background: '#16a34a', color: '#fff', lineHeight: 1 }}
+                                    >
+                                        AI
+                                    </span>
+                                </span>
+                            ) : (
+                                <span className="ml-auto text-[10px] opacity-60">›</span>
+                            )}
+                        </button>
+                    )
+                })}
+            </div>
         </div>
     )
 }

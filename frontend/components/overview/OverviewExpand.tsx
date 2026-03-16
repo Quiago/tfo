@@ -1,11 +1,13 @@
 import { AssetTree } from '@/components/asset-details/AssetTree'
 import { RichMachineSummary } from '@/components/asset-details/RichMachineSummary'
+import { SectionModal } from '@/components/asset-details/SectionModal'
 import { useOpshubStore } from '@/lib/store/opshub-store'
+import type { SectionId } from '@/lib/types/asset-tree'
 import type { TfoModule } from '@/lib/types/tfo'
 import s from '@/styles/overview-expanded/expanded.module.css'
 import dynamic from 'next/dynamic'
+import { useCallback, useEffect, useState } from 'react'
 
-// Dynamic imports — SSR disabled for heavy components
 const MultiLayerTimeline = dynamic(
     () =>
         import('@/components/timeline/Timeline').then((m) => m.MultiLayerTimeline),
@@ -29,6 +31,8 @@ interface OverviewExpandProps {
     onAnomalyTriggered: () => void
     onSelectAsset: (id: string) => void
     setActiveModule: (mod: TfoModule) => void
+    /** When true, highlights Workflows in the tree and auto-opens the Workflows modal */
+    highlightWorkflowsInTree?: boolean
 }
 
 export function OverviewExpand({
@@ -38,8 +42,32 @@ export function OverviewExpand({
     onAnomalyTriggered,
     onSelectAsset,
     setActiveModule,
+    highlightWorkflowsInTree = false,
 }: OverviewExpandProps) {
     const setPendingCreateWorkOrder = useOpshubStore(s => s.setPendingCreateWorkOrder)
+    const [activeSectionId, setActiveSectionId] = useState<SectionId | null>(null)
+
+    // Auto-open Workflows modal when arriving via optimization expand flow
+    useEffect(() => {
+        if (highlightWorkflowsInTree && viewMode === 'details') {
+            setActiveSectionId('workflows')
+        }
+    }, [highlightWorkflowsInTree, viewMode])
+
+    // Close modal when leaving details view
+    useEffect(() => {
+        if (viewMode !== 'details') {
+            setActiveSectionId(null)
+        }
+    }, [viewMode])
+
+    const handleSectionClick = useCallback((sectionId: SectionId) => {
+        setActiveSectionId(sectionId)
+    }, [])
+
+    const handleModalClose = useCallback(() => {
+        setActiveSectionId(null)
+    }, [])
 
     return (
         <>
@@ -52,8 +80,9 @@ export function OverviewExpand({
                     }`}
             >
                 <AssetTree
-                    selectedAssetId={selectedAsset || undefined}
-                    onSelect={onSelectAsset}
+                    activeSectionId={activeSectionId}
+                    onSectionClick={handleSectionClick}
+                    highlightWorkflows={highlightWorkflowsInTree}
                 />
             </div>
 
@@ -65,7 +94,7 @@ export function OverviewExpand({
                         : 'w-0 opacity-0 overflow-hidden pointer-events-none'
                     }`}
             >
-                {/* Machine Summary Card (Rich Stats) */}
+                {/* Machine Summary Card */}
                 <div className={`${s.card} h-[30%] flex-shrink-0 p-2`}>
                     <RichMachineSummary selectedAsset={selectedAsset} />
                 </div>
@@ -79,6 +108,16 @@ export function OverviewExpand({
                     />
                 </div>
             </div>
+
+            {/* Section Modal — rendered at this level so it overlays the expand view */}
+            {activeSectionId && viewMode === 'details' && (
+                <SectionModal
+                    sectionId={activeSectionId}
+                    onClose={handleModalClose}
+                    highlightOptimization={highlightWorkflowsInTree && activeSectionId === 'workflows'}
+                    onNavigateToModule={setActiveModule}
+                />
+            )}
         </>
     )
 }

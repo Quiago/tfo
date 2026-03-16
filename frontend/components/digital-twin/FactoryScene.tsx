@@ -18,6 +18,7 @@ interface FactorySceneProps {
     onMeshClick?: (event: MeshClickEvent) => void
     onCanvasClick?: (point: [number, number, number]) => void
     alertMeshPattern?: string | null
+    alertMode?: 'anomaly' | 'optimization'
     onAlertMeshFound?: (info: AlertMeshInfo) => void
     devMode?: boolean
     environment?: string
@@ -39,6 +40,7 @@ export function FactoryScene({
     onMeshClick,
     onCanvasClick,
     alertMeshPattern,
+    alertMode,
     onAlertMeshFound,
     devMode = false,
     environment = 'warehouse',
@@ -125,6 +127,7 @@ export function FactoryScene({
                         onMeshCount={onMeshCount}
                         onMeshClick={onMeshClick}
                         alertMeshPattern={alertMeshPattern}
+                        alertMode={alertMode}
                         onAlertMeshFound={onAlertMeshFound}
                         isolatedMeshName={isolatedMeshName}
                     />

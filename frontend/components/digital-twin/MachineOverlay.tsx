@@ -1,24 +1,29 @@
-import { AlertTriangle, ClipboardPlus, Maximize2, X } from 'lucide-react'
-import { AnomalyAlert } from './MachineInspector'
+import { AlertTriangle, ClipboardPlus, Maximize2, TrendingUp, X } from 'lucide-react'
+import type { OptimizationInsight, OverlayMode } from '@/lib/types/optimization'
+import type { AnomalyAlert } from './MachineInspector'
 import styles from '../../styles/overview/MachineOverlay.module.css'
 
 interface MachineOverlayProps {
     title: string
     meshName: string
     anomaly?: AnomalyAlert | null
+    optimization?: OptimizationInsight | null
     onClose: () => void
     onCreateWorkOrder?: (meshName: string) => void
-    onExpand?: (meshName: string, isAnomaly: boolean) => void
+    onExpand?: (meshName: string, mode: OverlayMode) => void
 }
 
 export function MachineOverlay({
     title,
     meshName,
     anomaly,
+    optimization,
     onClose,
     onCreateWorkOrder,
     onExpand,
 }: MachineOverlayProps) {
+    const expandMode: OverlayMode = anomaly ? 'anomaly' : optimization ? 'optimization' : null
+
     return (
         <div className={styles.overlayContainer}>
             <div className={styles.gradientBackground} />
@@ -35,7 +40,7 @@ export function MachineOverlay({
                     </button>
                 </div>
 
-                {/* Data Row - Mimicking the SVG layout with 4 metrics */}
+                {/* Data Row */}
                 <div className={styles.dataRow}>
                     <div className={styles.dataItem}>
                         <span className={styles.dataLabel}>Efficiency</span>
@@ -78,6 +83,43 @@ export function MachineOverlay({
                     </div>
                 )}
 
+                {/* Optimization Insight */}
+                {optimization && (
+                    <div className={styles.optimizationContainer}>
+                        <div className={styles.optimizationHeader}>
+                            <TrendingUp size={16} className="text-green-600" />
+                            <span className={styles.optimizationTitle}>{optimization.title}</span>
+                        </div>
+                        <p className={styles.optimizationText}>{optimization.description}</p>
+                        <div className={styles.optimizationMetrics}>
+                            <div className={styles.optimizationMetric}>
+                                <span className={styles.optimizationMetricLabel}>Saving</span>
+                                <span className={styles.optimizationMetricValue}>
+                                    €{optimization.potentialSavingEur.toLocaleString()}
+                                </span>
+                            </div>
+                            <div className={styles.optimizationMetric}>
+                                <span className={styles.optimizationMetricLabel}>Efficiency +</span>
+                                <span className={styles.optimizationMetricValue}>
+                                    {optimization.efficiencyGainPercent}%
+                                </span>
+                            </div>
+                            <div className={styles.optimizationMetric}>
+                                <span className={styles.optimizationMetricLabel}>Confidence</span>
+                                <span className={styles.optimizationMetricValue}>
+                                    {optimization.confidence}%
+                                </span>
+                            </div>
+                            <div className={styles.optimizationMetric}>
+                                <span className={styles.optimizationMetricLabel}>Est. time</span>
+                                <span className={styles.optimizationMetricValue}>
+                                    {optimization.estimatedHours}h
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* Actions */}
                 <div className={styles.actions}>
                     <button
@@ -91,7 +133,7 @@ export function MachineOverlay({
                     </button>
 
                     <button
-                        onClick={() => onExpand?.(meshName, !!anomaly)}
+                        onClick={() => onExpand?.(meshName, expandMode)}
                         className={`${styles.actionBtn} ${styles.btnExpand}`}
                     >
                         <div className={styles.actionIconWrapper}>
