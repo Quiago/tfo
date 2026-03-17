@@ -12,6 +12,7 @@ import { useOpshubStore } from '@/lib/store/opshub-store'
 import { useAuthStore } from '@/lib/store/auth-store'
 import { useTfoStore } from '@/lib/store/tfo-store'
 import { useScreenContext } from '@/lib/store/screen-context-store'
+import { useConnectorPreference } from '@/lib/hooks/useConnectorPreference'
 import type { OverlayMode } from '@/lib/types/optimization'
 import type { TfoModule } from '@/lib/types/tfo'
 import { Minimize2 } from 'lucide-react'
@@ -72,6 +73,8 @@ export default function TFODashboard() {
 }
 
 function Dashboard() {
+    useConnectorPreference()
+
     const { activeModule, setActiveModule, facilityMetrics, activeAlerts, recentWorkflows, locations, activeLocationId, setActiveLocation } =
         useTfoStore()
 

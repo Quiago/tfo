@@ -3,7 +3,7 @@ import logging
 from sqlmodel import Session, select
 
 from app.api.v1.auth import exceptions
-from app.api.v1.auth.schemas import UserLogin, UserRegister
+from app.api.v1.auth.schemas import PreferencesUpdate, UserLogin, UserRegister
 from app.core import security
 from app.models.user import User
 
@@ -40,6 +40,15 @@ def login(session: Session, data: UserLogin) -> str:
         raise exceptions.InactiveUser
     logger.info("user_logged_in", extra={"user_id": user.id})
     return security.create_access_token(user.id)
+
+
+def update_preferences(session: Session, user: User, data: PreferencesUpdate) -> User:
+    user.preferred_connector_id = data.preferred_connector_id
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    logger.info("user_preferences_updated", extra={"user_id": user.id})
+    return user
 
 
 def delete_user(session: Session, user_id: int, current_user: User) -> None:

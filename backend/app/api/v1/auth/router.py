@@ -26,6 +26,16 @@ def me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
+@router.patch("/me/preferences", response_model=schemas.UserResponse)
+def update_preferences(
+    data: schemas.PreferencesUpdate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Persist user preferences (e.g. preferred connector) server-side."""
+    return service.update_preferences(session, current_user, data)
+
+
 @router.get("/logout", status_code=status.HTTP_200_OK)
 def logout(current_user: User = Depends(get_current_user)):
     return {"message": "Successfully logged out."}
