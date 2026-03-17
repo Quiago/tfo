@@ -32,6 +32,24 @@ export async function readConnectorNode(
   );
 }
 
+export async function getConnector(connectorId: string): Promise<ConnectorResponse> {
+  return apiFetch<ConnectorResponse>(`/connectors/${encodeURIComponent(connectorId)}`);
+}
+
+export async function saveNodeMappings(
+  connectorId: string,
+  node_mappings: object[],
+  energy_mappings: object[],
+): Promise<ConnectorResponse> {
+  return apiFetch<ConnectorResponse>(
+    `/connectors/${encodeURIComponent(connectorId)}/node-mappings`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ node_mappings, energy_mappings }),
+    },
+  );
+}
+
 export async function readConnectorBatch(
   connectorId: string,
   nodeIds: string[],

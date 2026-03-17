@@ -106,6 +106,22 @@ def update_connector(connector_id: str, data: ConnectorUpdate, session: Session)
     return connector
 
 
+def save_node_mappings(
+    connector_id: str,
+    node_mappings: list[dict],
+    energy_mappings: list[dict],
+    session: Session,
+) -> Connector:
+    connector = get_connector(connector_id, session)
+    connector.node_mappings = node_mappings
+    connector.energy_mappings = energy_mappings
+    session.add(connector)
+    session.commit()
+    session.refresh(connector)
+    logger.info("node_mappings_saved", extra={"connector_id": connector_id, "count": len(node_mappings)})
+    return connector
+
+
 def delete_connector(connector_id: str, session: Session) -> None:
     connector = get_connector(connector_id, session)
     session.delete(connector)

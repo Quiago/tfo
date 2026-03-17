@@ -27,3 +27,6 @@ class Connector(SQLModel, table=True):
     backend_config: dict = Field(default_factory=dict, sa_column=Column(JSON))
     is_active: bool = True
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    # Cached node mappings resolved after discovery — avoids re-discovery on new sessions
+    node_mappings: list | None = Field(default=None, sa_column=Column(JSON))
+    energy_mappings: list | None = Field(default=None, sa_column=Column(JSON))

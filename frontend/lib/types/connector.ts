@@ -16,6 +16,8 @@ export interface ConnectorResponse {
   backend_config: Record<string, unknown>;
   is_active: boolean;
   created_at: string;
+  node_mappings: Record<string, unknown>[] | null;
+  energy_mappings: Record<string, unknown>[] | null;
 }
 
 export interface NodeInfoResponse {

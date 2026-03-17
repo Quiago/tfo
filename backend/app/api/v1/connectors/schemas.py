@@ -35,8 +35,15 @@ class ConnectorResponse(BaseModel):
     backend_config: dict
     is_active: bool
     created_at: datetime
+    node_mappings: list | None = None
+    energy_mappings: list | None = None
 
     model_config = {"from_attributes": True}
+
+
+class NodeMappingsUpdate(BaseModel):
+    node_mappings: list[dict]
+    energy_mappings: list[dict]
 
 
 class ReadRequest(BaseModel):

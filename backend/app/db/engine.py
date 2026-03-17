@@ -21,9 +21,17 @@ def create_db_and_tables() -> None:
     # Manual migrations for columns added after initial table creation.
     # SQLModel's create_all() never ALTERs existing tables.
     with engine.connect() as conn:
-        existing = [row[1] for row in conn.execute(text("PRAGMA table_info(users)"))]
-        if "preferred_connector_id" not in existing:
+        user_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(users)"))]
+        if "preferred_connector_id" not in user_cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN preferred_connector_id TEXT"))
+            conn.commit()
+
+        connector_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(connector)"))]
+        if "node_mappings" not in connector_cols:
+            conn.execute(text("ALTER TABLE connector ADD COLUMN node_mappings JSON"))
+            conn.commit()
+        if "energy_mappings" not in connector_cols:
+            conn.execute(text("ALTER TABLE connector ADD COLUMN energy_mappings JSON"))
             conn.commit()
 
 

@@ -35,6 +35,7 @@ from app.api.v1.connectors.schemas import (
     DataResponse,
     DiscoveryResponse,
     NodeInfoResponse,
+    NodeMappingsUpdate,
     ReadRequest,
     WriteRequest,
 )
@@ -75,6 +76,16 @@ def update_connector(
 def delete_connector(connector_id: str, session: Session = Depends(get_session)):
     """Elimina un conector del registro."""
     service.delete_connector(connector_id, session)
+
+
+@router.patch("/{connector_id}/node-mappings", response_model=ConnectorResponse)
+def save_node_mappings(
+    connector_id: str,
+    body: NodeMappingsUpdate,
+    session: Session = Depends(get_session),
+):
+    """Persiste los node/energy mappings resueltos tras el discovery."""
+    return service.save_node_mappings(connector_id, body.node_mappings, body.energy_mappings, session)
 
 
 @router.post("/{connector_id}/discover", response_model=DiscoveryResponse)

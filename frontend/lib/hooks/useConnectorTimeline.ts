@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { discoverConnector, readConnectorBatch } from '@/lib/services/connector.service';
+import { discoverConnector, getConnector, readConnectorBatch, saveNodeMappings } from '@/lib/services/connector.service';
 import {
     getChannelMetadata,
     getNodeMap,
@@ -97,43 +97,17 @@ export function pruneBuffer<T extends { timestamp: number }>(buf: T[], cutoffMs:
     return lo === 0 ? buf : buf.slice(lo);
 }
 
-// ─── DISCOVERY CACHE (localStorage) ──────────────────────────────────────────
+// ─── DISCOVERY CACHE (backend) ───────────────────────────────────────────────
+// Node/energy mappings are persisted server-side on the Connector record so they
+// survive across machines, browsers, and incognito sessions.
 
-function loadCachedMappings(connectorId: string): NodeMapping[] | null {
-    try {
-        const raw = localStorage.getItem(`node_mappings_${connectorId}`);
-        return raw ? (JSON.parse(raw) as NodeMapping[]) : null;
-    } catch {
-        return null;
-    }
+function persistMappings(connectorId: string, mappings: NodeMapping[], energyMappings: EnergyNodeMapping[]): void {
+    // Fire-and-forget — local state is already set; backend is the durable copy.
+    saveNodeMappings(connectorId, mappings, energyMappings).catch(() => { /* non-fatal */ });
 }
 
-function saveMappings(connectorId: string, mappings: NodeMapping[]): void {
-    try {
-        localStorage.setItem(`node_mappings_${connectorId}`, JSON.stringify(mappings));
-    } catch { /* non-fatal */ }
-}
-
-function clearCachedMappings(connectorId: string): void {
-    try {
-        localStorage.removeItem(`node_mappings_${connectorId}`);
-        localStorage.removeItem(`energy_mappings_${connectorId}`);
-    } catch { /* non-fatal */ }
-}
-
-function loadCachedEnergyMappings(connectorId: string): EnergyNodeMapping[] | null {
-    try {
-        const raw = localStorage.getItem(`energy_mappings_${connectorId}`);
-        return raw ? (JSON.parse(raw) as EnergyNodeMapping[]) : null;
-    } catch {
-        return null;
-    }
-}
-
-function saveEnergyMappings(connectorId: string, mappings: EnergyNodeMapping[]): void {
-    try {
-        localStorage.setItem(`energy_mappings_${connectorId}`, JSON.stringify(mappings));
-    } catch { /* non-fatal */ }
+function clearPersistedMappings(connectorId: string): void {
+    saveNodeMappings(connectorId, [], []).catch(() => { /* non-fatal */ });
 }
 
 // ─── NORMALIZATION ────────────────────────────────────────────────────────────
@@ -379,14 +353,21 @@ export function useConnectorTimeline(
 
         async function init() {
             // ── Sensor node mapping ───────────────────────────────────────────
-            const cached       = loadCachedMappings(connectorId!);
-            const cachedEnergy = loadCachedEnergyMappings(connectorId!);
+            // Load from backend first — avoids re-discovery on new sessions/machines.
+            let cached: NodeMapping[] | null = null;
+            let cachedEnergy: EnergyNodeMapping[] | null = null;
+            try {
+                const connector = await getConnector(connectorId!);
+                if (cancelled) return;
+                cached       = (connector.node_mappings   as NodeMapping[]   | null) ?? null;
+                cachedEnergy = (connector.energy_mappings as EnergyNodeMapping[] | null) ?? null;
+            } catch { /* non-fatal — fall through to fresh discovery */ }
 
             if (cached && cached.length > 0) {
                 nodeIdsRef.current   = cached.map((m) => m.nodeId);
                 signalIdsRef.current = cached.map((m) => m.signalId ?? '').filter(Boolean);
                 setNodeMappings(cached);
-                console.log('[Connector] Using cached sensor mappings for', connectorId);
+                console.log('[Connector] Using persisted sensor mappings for', connectorId);
 
                 if (cachedEnergy && cachedEnergy.length > 0) {
                     energyMappingsRef.current = cachedEnergy;
@@ -434,7 +415,6 @@ export function useConnectorTimeline(
                     }));
                     signalIdsRef.current = mappings.map((m) => m.signalId ?? '').filter(Boolean);
                     setNodeMappings(mappings);
-                    saveMappings(connectorId!, mappings);
 
                     // ── Energy nodes ──────────────────────────────────────────
                     const energyNodes = numericNodes.filter(
@@ -455,8 +435,11 @@ export function useConnectorTimeline(
                         }
                     }
                     energyMappingsRef.current = energyMappings;
+
+                    // Persist to backend (fire-and-forget)
+                    persistMappings(connectorId!, mappings, energyMappings);
+
                     if (energyMappings.length > 0) {
-                        saveEnergyMappings(connectorId!, energyMappings);
                         console.log('[Connector] Energy nodes discovered:',
                             energyMappings.map((m) => `${m.field}=${m.nodeId}(${m.signalId})`));
                     }
@@ -469,7 +452,7 @@ export function useConnectorTimeline(
                 } catch (err) {
                     if (cancelled) return;
                     const httpStatus = err instanceof ApiError ? err.status : null;
-                    if (httpStatus === 404) clearCachedMappings(connectorId!);
+                    if (httpStatus === 404) clearPersistedMappings(connectorId!);
                     const detail = err instanceof ApiError
                         ? `HTTP ${err.status}: ${err.message}`
                         : (err instanceof Error ? err.message : String(err));

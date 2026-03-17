@@ -72,15 +72,15 @@ CATALOG: dict[str, ModelConfig] = {
         dtype="float16",
         quantization="awq",
     ),
-    "llama-3.1-8b-awq": ModelConfig(
-        id="llama-3.1-8b-awq",
-        repo_id="hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4",
-        display_name="Llama 3.1 8B AWQ",
+    "nemotron-nano-9b-awq": ModelConfig(
+        id="nemotron-nano-9b-awq",
+        repo_id="cyankiwi/NVIDIA-Nemotron-Nano-9B-v2-AWQ-4bit",
+        display_name="Nemotron Nano 9B AWQ",
         description=(
-            "Alternativa estable con ecosistema maduro. "
-            "Native tool calling, ~6 GB VRAM."
+            "Modelo NVIDIA híbrido Mamba-2+Attention, superior a Qwen7B en coding/math. "
+            "AWQ 4-bit para <8GB VRAM en T4/RTX. Soporta tools y reasoning. ~6 GB VRAM, 128K contexto."
         ),
-        context_length=8192,
+        context_length=131072,
         memory_required_gb=6.0,
         supports_tools=True,
         dtype="float16",
