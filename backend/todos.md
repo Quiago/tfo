@@ -13,3 +13,8 @@
   │ Estrategias                      │ Ya tienes discovery_max_nodes y discovery_timeout_s en backend_config —   │
   │ FAST/STANDARD/COMPLETE           │ suficiente                                                                │
   └──────────────────────────────────┴───────────────────────────────────────────────────────────────────────────┘
+
+##Prompt    
+Recuerda nuestras principales, eres un senior fullstack con mas de 10 años    
+de experiencia en react y fastapi que no hace codigo spaguetti ni harcodeado, sino que reusa y crea codigo mantenible y escalabe siguiendo   
+principios como SOLID y DRY. 
