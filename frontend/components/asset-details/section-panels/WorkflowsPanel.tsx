@@ -13,12 +13,7 @@ import {
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useState } from 'react'
 
-// ── Lazy-loaded heavy components (SSR-unsafe: R3F + framer-motion) ────────────
-
-const MaterializationOverlay = dynamic(
-    () => import('@/components/workflow-builder/MaterializationOverlay').then((m) => m.MaterializationOverlay),
-    { ssr: false },
-)
+// ── Lazy-loaded heavy components (SSR-unsafe) ─────────────────────────────────
 
 const WorkflowCanvasReadOnly = dynamic(
     () => import('@/components/workflow-builder/WorkflowCanvasReadOnly').then((m) => m.WorkflowCanvasReadOnly),
@@ -97,13 +92,13 @@ const OPTIM_RF_WORKFLOW: RfWorkflow = {
     tags: ['optimization', 'axis-3', 'ai-generated'],
     executionCount: 0,
     nodes: [
-        { id: 'n1', type: 'sensor_trigger',  label: 'Vibration Alert',          position: { x: 40,   y: 80 }, config: {} },
-        { id: 'n2', type: 'log_entry',       label: 'Backup Axis 3 Config',     position: { x: 400,  y: 80 }, config: {} },
-        { id: 'n3', type: 'ai_suggest',      label: 'Upload New Path Profile',  position: { x: 780,  y: 80 }, config: { prompt: 'Apply optimized KRL motion path for Axis 3' } },
-        { id: 'n4', type: 'checklist_gate',  label: 'Test Cycle (10 reps)',     position: { x: 1180, y: 80 }, config: { items: [{ id: 'c1', label: 'Run 10 dry-run cycles', required: true }] } },
-        { id: 'n5', type: 'decision',        label: 'Vibration < threshold?',   position: { x: 1540, y: 80 }, config: { condition: 'vibration < 7.0 mm/s', trueLabel: 'Yes', falseLabel: 'No' } },
-        { id: 'n6', type: 'create_ticket',   label: 'Create Work Order',        position: { x: 1900, y: 10  }, config: { service: 'servicenow', titleTemplate: 'Axis 3 optimization approved', descriptionTemplate: '', priority: 'medium' } },
-        { id: 'n7', type: 'send_alert',      label: 'Alert: Abort & Review',    position: { x: 1900, y: 140 }, config: { channel: 'slack', messageTemplate: 'Axis 3 optimization validation failed — review required.' } },
+        { id: 'n1', type: 'sensor_trigger',  label: 'Vibration Alert',          position: { x: 40,   y: 180 }, config: {} },
+        { id: 'n2', type: 'log_entry',       label: 'Backup Axis 3 Config',     position: { x: 540,  y: 180 }, config: {} },
+        { id: 'n3', type: 'ai_suggest',      label: 'Upload New Path Profile',  position: { x: 1040,  y: 180 }, config: { prompt: 'Apply optimized KRL motion path for Axis 3' } },
+        { id: 'n4', type: 'checklist_gate',  label: 'Test Cycle (10 reps)',     position: { x: 1540, y: 180 }, config: { items: [{ id: 'c1', label: 'Run 10 dry-run cycles', required: true }] } },
+        { id: 'n5', type: 'decision',        label: 'Vibration < threshold?',   position: { x: 2040, y: 180 }, config: { condition: 'vibration < 7.0 mm/s', trueLabel: 'Yes', falseLabel: 'No' } },
+        { id: 'n6', type: 'create_ticket',   label: 'Create Work Order',        position: { x: 2540, y: 40  }, config: { service: 'servicenow', titleTemplate: 'Axis 3 optimization approved', descriptionTemplate: '', priority: 'medium' } },
+        { id: 'n7', type: 'send_alert',      label: 'Alert: Abort & Review',    position: { x: 2540, y: 340 }, config: { channel: 'slack', messageTemplate: 'Axis 3 optimization validation failed — review required.' } },
     ],
     edges: [
         { id: 'e1', source: 'n1', target: 'n2' },
@@ -286,31 +281,27 @@ export function WorkflowsPanel({
     const [selectedId, setSelectedId] = useState<string | null>(
         highlightOptimization ? 'wf-optim' : null,
     )
-    const [materializing, setMaterializing] = useState(false)
-
     useEffect(() => {
         if (highlightOptimization) setSelectedId('wf-optim')
     }, [highlightOptimization])
 
-    // Trigger the materialisation animation instead of immediately closing
-    const handleApprove = useCallback(() => {
-        setMaterializing(true)
-    }, [])
+    const loadWorkflow    = useWorkflowStore((s) => s.loadWorkflow)
+    const streamWorkflow  = useWorkflowStore((s) => s.streamWorkflow)
 
-    // Called by MaterializationOverlay when all phases complete
-    const handleMaterializationComplete = useCallback(() => {
-        setMaterializing(false)
-        setStatuses((prev) => ({ ...prev, 'wf-optim': 'running' }))
-        onClose?.()
-    }, [onClose])
-
-    const loadWorkflow = useWorkflowStore((s) => s.loadWorkflow)
-
+    // Navigate to builder loading workflow immediately (for manual edit)
     const handleEditInBuilder = useCallback((rfWorkflow?: RfWorkflow) => {
         if (rfWorkflow) loadWorkflow(rfWorkflow)
         onClose?.()
         onNavigateToModule?.('workflows')
     }, [loadWorkflow, onClose, onNavigateToModule])
+
+    // Approve: stream workflow node-by-node in the builder — same UX as OpsHub work orders
+    const handleApprove = useCallback(() => {
+        const optim = WORKFLOWS.find(w => w.id === 'wf-optim')
+        if (optim?.rfWorkflow) streamWorkflow(optim.rfWorkflow)
+        onClose?.()
+        onNavigateToModule?.('workflows')
+    }, [streamWorkflow, onClose, onNavigateToModule])
 
     const navItems = buildNavItems(statuses, highlightOptimization)
     const selectedWorkflow = selectedId ? WORKFLOWS.find((w) => w.id === selectedId) : null
@@ -318,19 +309,8 @@ export function WorkflowsPanel({
         ? { ...selectedWorkflow, status: statuses[selectedWorkflow.id] ?? selectedWorkflow.status }
         : null
 
-    // rfWorkflow of the currently selected optimization (for the overlay)
-    const optimRfWorkflow = WORKFLOWS.find((w) => w.id === 'wf-optim')?.rfWorkflow
-
     return (
         <>
-            {/* Materialisation overlay — rendered outside PanelLayout so it sits at z-[300] */}
-            {materializing && optimRfWorkflow && (
-                <MaterializationOverlay
-                    workflow={optimRfWorkflow}
-                    onComplete={handleMaterializationComplete}
-                />
-            )}
-
             <PanelLayout
                 leftNav={
                     <NavTree
@@ -345,7 +325,6 @@ export function WorkflowsPanel({
                             workflow={selectedWithStatus}
                             isOptimization={selectedWithStatus.id === 'wf-optim'}
                             onApprove={handleApprove}
-                            onEditInBuilder={() => handleEditInBuilder(selectedWithStatus.rfWorkflow)}
                           />
                         : <WorkflowsOverview statuses={statuses} />
                 }
@@ -392,10 +371,9 @@ interface WorkflowDetailProps {
     workflow: PanelWorkflow & { status: WorkflowStatus }
     isOptimization: boolean
     onApprove: () => void
-    onEditInBuilder: () => void
 }
 
-function WorkflowDetail({ workflow, isOptimization, onApprove, onEditInBuilder }: WorkflowDetailProps) {
+function WorkflowDetail({ workflow, isOptimization, onApprove }: WorkflowDetailProps) {
     const cfg = STATUS_CONFIG[workflow.status]
     const isApproved = workflow.status === 'running'
 
@@ -440,37 +418,32 @@ function WorkflowDetail({ workflow, isOptimization, onApprove, onEditInBuilder }
                 <WhySection rationale={workflow.rationale} />
             )}
 
-            {/* Workflow canvas */}
-            <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--tp-stroke)' }}>
-                <div className="px-4 py-3" style={{ background: 'var(--tp-bg-card)', borderBottom: '1px solid var(--tp-stroke)' }}>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--tp-text-muted)' }}>
-                        Workflow
-                    </p>
+            {/* Workflow steps/canvas — non-optimization workflows only */}
+            {!isOptimization && (
+                <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--tp-stroke)' }}>
+                    <div className="px-4 py-3" style={{ background: 'var(--tp-bg-card)', borderBottom: '1px solid var(--tp-stroke)' }}>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--tp-text-muted)' }}>
+                            Workflow
+                        </p>
+                    </div>
+                    <div className="h-72">
+                        {workflow.rfWorkflow ? (
+                            <WorkflowCanvasReadOnly workflow={workflow.rfWorkflow} />
+                        ) : (
+                            <StepsAsFallback steps={workflow.steps} />
+                        )}
+                    </div>
                 </div>
-                <div className="h-72">
-                    {workflow.rfWorkflow ? (
-                        <WorkflowCanvasReadOnly workflow={workflow.rfWorkflow} />
-                    ) : (
-                        <StepsAsFallback steps={workflow.steps} />
-                    )}
-                </div>
-            </div>
+            )}
 
-            {/* CTAs (optimization only) */}
+            {/* Approve CTA (optimization only) — navigates to builder where workflow streams in */}
             {isOptimization && !isApproved && (
-                <div className="flex gap-3 pt-1">
+                <div className="pt-1">
                     <button
                         onClick={onApprove}
-                        className="flex-1 py-2.5 text-xs font-bold rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors"
+                        className="w-full py-2.5 text-xs font-bold rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors"
                     >
                         Approve &amp; Create Work Order
-                    </button>
-                    <button
-                        onClick={onEditInBuilder}
-                        className="px-5 py-2.5 text-xs font-semibold rounded-lg border transition-colors hover:bg-zinc-50"
-                        style={{ border: '1px solid var(--tp-stroke)', color: 'var(--tp-text-body)' }}
-                    >
-                        Edit First
                     </button>
                 </div>
             )}

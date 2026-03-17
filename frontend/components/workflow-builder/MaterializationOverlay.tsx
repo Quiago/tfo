@@ -5,10 +5,9 @@
  *
  * Visual sequence:
  *   1. model_spinning       → Robot spins. Building tension.
- *   2. shooting_lines       → Arrows animate from real robot-part positions
- *                             (projected from the 3D bounding box) to each
- *                             node's pre-computed screen position.
- *   3. nodes_materializing  → Robot arrows fade out. Nodes spring in.
+ *   2. shooting_lines       → Single dashed "signal" bezier from robot center
+ *                             to the first/trigger node (no crossings, clean).
+ *   3. nodes_materializing  → Signal fades. Nodes spring into view.
  *                             Edge arrows draw along workflow connections.
  *   4. sequential_success   → Green cascade through nodes + robot.
  *
@@ -34,8 +33,6 @@ import { NodeIcon } from './NodeIcon'
 
 // ── Animation timing ───────────────────────────────────────────────────────────
 
-const LINE_DURATION    = 0.55   // s — each robot→node arrow draw time
-const LINE_STAGGER     = 0.14   // s — stagger between robot arrows
 const NODE_STAGGER     = 0.09   // s — stagger between node spring animations
 const EDGE_START_DELAY = 0.55   // s — wait after first node before edges draw
 const EDGE_DURATION    = 0.32   // s — each inter-node edge arrow draw time
@@ -56,7 +53,11 @@ const NODE_COLOUR: Record<string, { bg: string }> = {
     slate:   { bg: '#64748b' },
 }
 
-// ── Layout: RF → screen (pure, uses window dimensions) ────────────────────────
+// ── Layout: RF → screen ────────────────────────────────────────────────────────
+//
+// Maps ReactFlow node positions to screen-space card centers.
+// Card centers are bounded to [safeLeft, safeRight] × [safeTop, safeBot]
+// so no card ever clips outside the right panel — all values are dynamic.
 
 function computeNodeScreenPositions(
     nodes: WorkflowNode[],
@@ -65,55 +66,63 @@ function computeNodeScreenPositions(
 ): Record<string, ScreenPos> {
     if (nodes.length === 0) return {}
 
-    const CANVAS_W    = W * 0.40
-    const PANEL_LEFT  = CANVAS_W + 20
-    const PANEL_RIGHT = W - 50
-    const NODE_HALF_W = 65           // half of 130px card
-    const CENTER_Y    = H * 0.48
+    const CARD_W = 130
+    const CARD_H = 54
+    // Tight horizontal padding so the layout uses the full panel width
+    const PAD_X  = 12
+    const PAD_Y  = 52
 
-    const xs   = nodes.map((n) => n.position.x)
-    const ys   = nodes.map((n) => n.position.y)
+    // Card centers must stay inside this safe area to avoid clipping
+    const safeLeft  = W * 0.40 + CARD_W / 2 + PAD_X
+    const safeRight = W        - CARD_W / 2 - PAD_X
+    const safeTop   = CARD_H / 2 + PAD_Y
+    const safeBot   = H - CARD_H / 2 - PAD_Y
+
+    const xs = nodes.map(n => n.position.x)
+    const ys = nodes.map(n => n.position.y)
     const minX = Math.min(...xs), maxX = Math.max(...xs)
     const minY = Math.min(...ys), maxY = Math.max(...ys)
-    const rfW  = maxX - minX || 1
-    const rfH  = maxY - minY || 1
+    const rfW = maxX - minX || 1
+    const rfH = maxY - minY || 1
 
-    const availW = PANEL_RIGHT - PANEL_LEFT - NODE_HALF_W * 2
-    const scaleX = Math.max(availW / rfW, 0.1)
-    // Amplify small Y differences so branching is visible
-    const rawScaleY = (H * 0.65) / rfH
-    const scaleY    = Math.min(rawScaleY, 4)
-    const midRfY    = (minY + maxY) / 2
+    const availW = safeRight - safeLeft
+    const availH = safeBot   - safeTop
+
+    // Fill available width; cap Y scaling to avoid extreme vertical spread
+    const scaleX = availW / rfW
+    const scaleY = Math.min(availH / rfH, scaleX * 1.2)
+
+    // Center layout vertically
+    const layoutH = rfH * scaleY
+    const startY  = safeTop + (availH - layoutH) / 2
 
     const result: Record<string, ScreenPos> = {}
-    nodes.forEach((n) => {
+    nodes.forEach(n => {
         result[n.id] = {
-            x: PANEL_LEFT + NODE_HALF_W + (n.position.x - minX) * scaleX,
-            y: CENTER_Y + (n.position.y - midRfY) * scaleY,
+            x: safeLeft + (n.position.x - minX) * scaleX,
+            y: startY   + (n.position.y - minY) * scaleY,
         }
     })
     return result
 }
 
-// ── R3F: Model + real anchor projection ───────────────────────────────────────
+// ── R3F: Model + single center anchor projection ───────────────────────────────
 //
-// Distributes N anchor points along the robot's actual world-space bounding
-// box (Y axis = base to top), then projects them to screen coords every frame.
-// This guarantees lines start FROM visible parts of the 3D model.
+// Computes ONE anchor point (center of the robot's bounding box along Y)
+// and projects it to screen coordinates every frame.
 
-interface AnchorProbeProps {
-    n: number                                  // number of anchor points
+interface ModelWithAnchorProps {
     phase: AnimationPhase
-    onAnchorsReady: (positions: ScreenPos[]) => void
+    onAnchorReady: (pos: ScreenPos) => void
 }
 
-function ModelWithAnchors({ n, phase, onAnchorsReady }: AnchorProbeProps) {
-    const { scene }          = useGLTF('/models/kuka.glb')
-    const { camera, size }   = useThree()
-    const anchorsRef         = useRef<THREE.Vector3[]>([])
-    const prevScreenRef      = useRef<ScreenPos[]>([])
+function ModelWithAnchor({ phase, onAnchorReady }: ModelWithAnchorProps) {
+    const { scene }        = useGLTF('/models/kuka.glb')
+    const { camera, size } = useThree()
+    const anchorRef        = useRef<THREE.Vector3 | null>(null)
+    const prevRef          = useRef<ScreenPos>({ x: -9999, y: -9999 })
 
-    // ── Apply material colours based on phase ──────────────────────────────────
+    // ── Phase-dependent material ───────────────────────────────────────────────
     useEffect(() => {
         const success = phase === 'sequential_success'
         scene.traverse((child) => {
@@ -130,50 +139,30 @@ function ModelWithAnchors({ n, phase, onAnchorsReady }: AnchorProbeProps) {
         })
     }, [scene, phase])
 
-    // ── Compute anchor points from bounding box (after Stage settles ~200ms) ──
+    // ── Compute anchor from real bounding box after Stage settles ──────────────
     useEffect(() => {
         const t = setTimeout(() => {
             const box    = new THREE.Box3().setFromObject(scene)
             const center = box.getCenter(new THREE.Vector3())
-            const sizeVec = box.getSize(new THREE.Vector3())
-
-            // Distribute N points from base to tip along Y; slight X/Z variation
-            // so lines come from visually distinct parts of the robot arm.
-            anchorsRef.current = Array.from({ length: n }, (_, i) => {
-                const t  = i / Math.max(n - 1, 1)
-                const xOff = (i % 2 === 0 ? 0.15 : -0.15) * sizeVec.x
-                return new THREE.Vector3(
-                    center.x + xOff,
-                    box.min.y + t * sizeVec.y,
-                    center.z,
-                )
-            }).reverse() // top → bottom order so first line = end-effector
-        }, 220) // wait for Stage to apply centering transform
-
+            // Use the right-side center of the robot (facing toward the workflow panel)
+            anchorRef.current = new THREE.Vector3(
+                box.max.x,            // rightmost X edge of the robot
+                center.y + box.getSize(new THREE.Vector3()).y * 0.2, // slightly above center
+                center.z,
+            )
+        }, 220)
         return () => clearTimeout(t)
-    }, [scene, n])
+    }, [scene])
 
-    // ── Project anchors to screen every frame, throttled by 4px delta ─────────
+    // ── Project to screen, throttled by 3px delta ──────────────────────────────
     useFrame(() => {
-        if (anchorsRef.current.length === 0) return
-
-        const next: ScreenPos[] = anchorsRef.current.map((anchor) => {
-            const ndc = anchor.clone().project(camera)
-            return {
-                x: ((ndc.x + 1) / 2) * size.width,
-                y: ((-ndc.y + 1) / 2) * size.height,
-            }
-        })
-
-        // Only update if any point moved >4px (avoid flooding state updates)
-        const changed = next.some((p, i) => {
-            const prev = prevScreenRef.current[i]
-            return !prev || Math.abs(p.x - prev.x) > 4 || Math.abs(p.y - prev.y) > 4
-        })
-
-        if (changed) {
-            prevScreenRef.current = next
-            onAnchorsReady(next)
+        if (!anchorRef.current) return
+        const ndc = anchorRef.current.clone().project(camera)
+        const x   = ((ndc.x + 1) / 2) * size.width
+        const y   = ((-ndc.y + 1) / 2) * size.height
+        if (Math.abs(x - prevRef.current.x) > 3 || Math.abs(y - prevRef.current.y) > 3) {
+            prevRef.current = { x, y }
+            onAnchorReady({ x, y })
         }
     })
 
@@ -216,54 +205,107 @@ function OverlayNodeCard({ node, isSuccess }: { node: WorkflowNode; isSuccess: b
     )
 }
 
-// ── Reusable animated arrow (line + arrowhead that follows the drawn tip) ──────
+// ── Signal line — single dashed animated bezier ────────────────────────────────
+//
+// Looks like a data/signal transmission beam.
+// Layer 1: glowing solid track (drawn with pathLength).
+// Layer 2: dashed overlay animated with strokeDashoffset (flowing dashes).
+// Layer 3: arrowhead springs in at the target node.
 
-interface AnimatedArrowProps {
-    from: ScreenPos
-    to:   ScreenPos
-    stroke: string
-    markerId: string
-    delay: number
-    duration: number
-    initialOpacity?: number
-    finalOpacity?: number
-}
-
-function AnimatedArrow({
-    from, to, stroke, markerId,
-    delay, duration,
-    initialOpacity = 0.9, finalOpacity = 0.65,
-}: AnimatedArrowProps) {
-    // Angle for the arrowhead polygon (pointing from→to)
+function SignalLine({ from, to }: { from: ScreenPos; to: ScreenPos }) {
+    const dx    = to.x - from.x
+    const adx   = Math.abs(dx)
+    const path  = `M ${from.x},${from.y} C ${from.x + adx * 0.45},${from.y} ${to.x - adx * 0.20},${to.y} ${to.x},${to.y}`
     const angle = Math.atan2(to.y - from.y, to.x - from.x) * (180 / Math.PI)
 
     return (
         <g>
-            {/* Line — pathLength draws from robot toward node */}
+            {/* Glow track — draws in */}
             <motion.path
-                d={`M ${from.x},${from.y} L ${to.x},${to.y}`}
+                d={path}
+                stroke="#4f46e5"
+                strokeWidth="5"
+                fill="none"
+                filter="url(#arrow-glow)"
+                initial={{ pathLength: 0, opacity: 0 }}
+                animate={{ pathLength: 1, opacity: 0.18 }}
+                transition={{ duration: 0.9, ease: 'easeOut' }}
+            />
+            {/* Dashed signal — flowing dashes, no pathLength conflict */}
+            <motion.path
+                d={path}
+                stroke="#a5b4fc"
+                strokeWidth="1.8"
+                strokeDasharray="10 7"
+                fill="none"
+                filter="url(#arrow-glow)"
+                // Offset starts large (hides dashes beyond path start) → flows to -17 (one dash-gap cycle)
+                initial={{ strokeDashoffset: 800, opacity: 0 }}
+                animate={{ strokeDashoffset: -17, opacity: 0.85 }}
+                transition={{
+                    strokeDashoffset: { duration: 1.4, ease: 'linear', repeat: Infinity, repeatType: 'loop' },
+                    opacity: { duration: 0.25 },
+                }}
+            />
+            {/* Arrowhead at target — springs in after signal arrives */}
+            <motion.g
+                initial={{ opacity: 0, scale: 0 }}
+                animate={{ opacity: 0.9, scale: 1 }}
+                transition={{ delay: 0.75, type: 'spring', stiffness: 400, damping: 20 }}
+                style={{ originX: `${to.x}px`, originY: `${to.y}px` }}
+            >
+                <polygon
+                    points="-10,-4.5 0,0 -10,4.5"
+                    fill="#818cf8"
+                    transform={`translate(${to.x}, ${to.y}) rotate(${angle})`}
+                    filter="url(#arrow-glow)"
+                />
+            </motion.g>
+        </g>
+    )
+}
+
+// ── Edge arrow — bezier inter-node connection ─────────────────────────────────
+
+interface EdgeArrowProps {
+    from:     ScreenPos
+    to:       ScreenPos
+    stroke:   string
+    delay:    number
+    duration: number
+    finalOpacity?: number
+}
+
+function EdgeArrow({ from, to, stroke, delay, duration, finalOpacity = 0.55 }: EdgeArrowProps) {
+    const dx    = to.x - from.x
+    const adx   = Math.abs(dx)
+    const path  = `M ${from.x},${from.y} C ${from.x + adx * 0.45},${from.y} ${to.x - adx * 0.20},${to.y} ${to.x},${to.y}`
+    const angle = Math.atan2(to.y - from.y, to.x - from.x) * (180 / Math.PI)
+
+    return (
+        <g>
+            <motion.path
+                d={path}
                 stroke={stroke}
                 strokeWidth="1.5"
                 strokeLinecap="round"
                 fill="none"
                 filter="url(#arrow-glow)"
-                initial={{ pathLength: 0, opacity: initialOpacity }}
+                initial={{ pathLength: 0, opacity: 0.7 }}
                 animate={{ pathLength: 1, opacity: finalOpacity }}
                 transition={{
                     pathLength: { delay, duration, ease: 'easeOut' },
                     opacity:    { delay, duration: 0.08 },
                 }}
             />
-            {/* Arrowhead — springs in just as the line reaches the target */}
             <motion.g
                 initial={{ opacity: 0, scale: 0 }}
                 animate={{ opacity: finalOpacity + 0.1, scale: 1 }}
-                transition={{ delay: delay + duration - 0.06, duration: 0.2, type: 'spring', stiffness: 500 }}
+                transition={{ delay: delay + duration - 0.05, type: 'spring', stiffness: 500 }}
                 style={{ originX: `${to.x}px`, originY: `${to.y}px` }}
             >
                 <polygon
-                    id={markerId}
-                    points="-10,-4.5 0,0 -10,4.5"
+                    points="-8,-3.5 0,0 -8,3.5"
                     fill={stroke}
                     transform={`translate(${to.x}, ${to.y}) rotate(${angle})`}
                     filter="url(#arrow-glow)"
@@ -289,40 +331,40 @@ export function MaterializationOverlay({
         return reset
     }, [trigger, reset])
 
-    // ── Pre-compute node positions at mount (pure, no DOM measurement) ──────────
+    // ── Pre-compute node positions (pure, window-dimension based) ────────────────
     const nodePositions = useMemo<Record<string, ScreenPos>>(
         () => typeof window !== 'undefined'
             ? computeNodeScreenPositions(workflow.nodes, window.innerWidth, window.innerHeight)
             : {},
+        // stable for the duration of the overlay
         // eslint-disable-next-line react-hooks/exhaustive-deps
-        [],   // stable for the duration of the overlay
+        [],
     )
 
-    // ── Anchor positions updated by the R3F canvas ──────────────────────────────
-    const [anchors, setAnchors] = useState<ScreenPos[]>([])
-    const handleAnchorsReady = useCallback((pos: ScreenPos[]) => setAnchors(pos), [])
+    // ── Single anchor from the robot, updated each frame ────────────────────────
+    const [anchor, setAnchor] = useState<ScreenPos | null>(null)
+    const handleAnchorReady = useCallback((pos: ScreenPos) => setAnchor(pos), [])
 
-    // ── Robot → node arrows (computed once when shooting_lines starts) ──────────
-    const [robotArrows, setRobotArrows] = useState<Array<{ nodeId: string; from: ScreenPos; to: ScreenPos }>>([])
-    const anchorsRef = useRef<ScreenPos[]>([])
-    anchorsRef.current = anchors
+    // ── First (trigger) node — signal target ─────────────────────────────────────
+    const firstNode = useMemo(
+        () => workflow.nodes.find(n => NODE_REGISTRY[n.type]?.category === 'trigger')
+            ?? workflow.nodes[0],
+        [workflow.nodes],
+    )
+    const signalTarget = firstNode ? nodePositions[firstNode.id] : null
+
+    // Snapshot anchor when shooting_lines begins (stable, no drift during animation)
+    const [signalFrom, setSignalFrom] = useState<ScreenPos | null>(null)
+    const anchorRef = useRef<ScreenPos | null>(null)
+    anchorRef.current = anchor
 
     useEffect(() => {
         if (phase !== 'shooting_lines') return
-        // Small delay so anchors have had at least one frame to project
         const t = setTimeout(() => {
-            const snapshotAnchors = anchorsRef.current
-            if (snapshotAnchors.length === 0) return
-            setRobotArrows(
-                workflow.nodes.map((n, i) => ({
-                    nodeId: n.id,
-                    from:   snapshotAnchors[i % snapshotAnchors.length],
-                    to:     nodePositions[n.id] ?? { x: 0, y: 0 },
-                })),
-            )
+            if (anchorRef.current) setSignalFrom(anchorRef.current)
         }, 80)
         return () => clearTimeout(t)
-    }, [phase, workflow.nodes, nodePositions])
+    }, [phase])
 
     // ── Inter-node edge arrows ──────────────────────────────────────────────────
     const edgeArrows = useMemo(
@@ -341,7 +383,7 @@ export function MaterializationOverlay({
         const timers: ReturnType<typeof setTimeout>[] = []
         workflow.nodes.forEach((node, i) => {
             timers.push(setTimeout(
-                () => setSuccessSet((prev) => new Set([...prev, node.id])),
+                () => setSuccessSet(prev => new Set([...prev, node.id])),
                 i * 220,
             ))
         })
@@ -349,35 +391,34 @@ export function MaterializationOverlay({
     }, [phase, workflow.nodes])
 
     // ── Phase flags ─────────────────────────────────────────────────────────────
-    const showRobotArrows = phase === 'shooting_lines'
-    const showNodes       = phase === 'nodes_materializing' || phase === 'sequential_success'
-    const showEdgeArrows  = phase === 'nodes_materializing' || phase === 'sequential_success'
-    const isSuccess       = phase === 'sequential_success'
-    const spinSpeed       = phase === 'model_spinning' ? 3.5 : 0.8
-    const robotColour     = isSuccess ? '#22c55e' : '#6366f1'
-    const edgeColour      = isSuccess ? '#22c55e' : '#475569'
+    const showSignal     = phase === 'shooting_lines'
+    const showNodes      = phase === 'nodes_materializing' || phase === 'sequential_success'
+    const showEdgeArrows = phase === 'nodes_materializing' || phase === 'sequential_success'
+    const isSuccess      = phase === 'sequential_success'
+    const spinSpeed      = phase === 'model_spinning' ? 3.5 : 0.8
+    const edgeColour     = isSuccess ? '#22c55e' : '#475569'
 
-    const W = typeof window !== 'undefined' ? window.innerWidth : 1400
+    const PANEL_LEFT_PX = typeof window !== 'undefined' ? window.innerWidth * 0.40 : 0
 
     return (
         <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(2,6,23,0.97)', display: 'flex', overflow: 'hidden' }}>
 
             {/* ── Left 40%: R3F canvas ── */}
             <div style={{ width: '40%', height: '100%', position: 'relative', flexShrink: 0 }}>
-                <Canvas shadows dpr={[1, 2]} camera={{ fov: 50, position: [0, 2, 8] }}>
+                {/* Slightly wider FOV + further camera → model appears smaller */}
+                <Canvas shadows dpr={[1, 2]} camera={{ fov: 55, position: [0, 1.5, 11] }}>
                     <Suspense fallback={null}>
                         <Stage environment="city" intensity={0.6}>
-                            <ModelWithAnchors
-                                n={workflow.nodes.length}
+                            <ModelWithAnchor
                                 phase={phase}
-                                onAnchorsReady={handleAnchorsReady}
+                                onAnchorReady={handleAnchorReady}
                             />
                         </Stage>
                     </Suspense>
                     <OrbitControls autoRotate autoRotateSpeed={spinSpeed} makeDefault enableZoom={false} />
                 </Canvas>
 
-                {/* Pulse ring during line emission */}
+                {/* Pulse ring during signal emission */}
                 {phase === 'shooting_lines' && (
                     <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <motion.div
@@ -408,6 +449,7 @@ export function MaterializationOverlay({
 
             {/* ── Right 60%: Node cards ── */}
             <div style={{ flex: 1, height: '100%', position: 'relative', overflow: 'hidden' }}>
+                {/* Dot grid */}
                 <div style={{
                     position: 'absolute', inset: 0, opacity: 0.12,
                     backgroundImage: 'radial-gradient(circle, #475569 1px, transparent 1px)',
@@ -417,8 +459,7 @@ export function MaterializationOverlay({
                 {workflow.nodes.map((node, i) => {
                     const pos = nodePositions[node.id]
                     if (!pos) return null
-                    // Convert screen x → panel-local x (panel starts at W*0.40)
-                    const localX = pos.x - W * 0.40
+                    const localX = pos.x - PANEL_LEFT_PX
 
                     return (
                         <motion.div
@@ -438,40 +479,28 @@ export function MaterializationOverlay({
             </div>
 
             {/* ── SVG: full-screen arrow layer ── */}
-            <svg
-                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 50 }}
-            >
+            <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 50 }}>
                 <defs>
                     <filter id="arrow-glow" x="-60%" y="-60%" width="220%" height="220%">
-                        <feGaussianBlur stdDeviation="2" result="blur" />
+                        <feGaussianBlur stdDeviation="2.5" result="blur" />
                         <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
                     </filter>
                 </defs>
 
-                {/* Phase 1: Robot → node arrows */}
-                {showRobotArrows && robotArrows.map((arrow, i) => (
-                    <AnimatedArrow
-                        key={`robot-${arrow.nodeId}`}
-                        from={arrow.from}
-                        to={arrow.to}
-                        stroke={robotColour}
-                        markerId={`arrow-r-${i}`}
-                        delay={i * LINE_STAGGER}
-                        duration={LINE_DURATION}
-                    />
-                ))}
+                {/* Phase 1: Single dashed signal line robot → first node */}
+                {showSignal && signalFrom && signalTarget && (
+                    <SignalLine from={signalFrom} to={signalTarget} />
+                )}
 
                 {/* Phase 2: Inter-node edge arrows */}
                 {showEdgeArrows && edgeArrows.map((edge, i) => (
-                    <AnimatedArrow
+                    <EdgeArrow
                         key={`edge-${edge.id}`}
                         from={edge.from}
                         to={edge.to}
                         stroke={edgeColour}
-                        markerId={`arrow-e-${i}`}
                         delay={EDGE_START_DELAY + i * EDGE_STAGGER}
                         duration={EDGE_DURATION}
-                        initialOpacity={0.7}
                         finalOpacity={isSuccess ? 0.7 : 0.45}
                     />
                 ))}

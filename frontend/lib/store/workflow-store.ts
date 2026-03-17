@@ -41,6 +41,7 @@ interface WorkflowBuilderState {
     loadWorkflow: (workflow: Workflow) => void
     updateWorkflowMeta: (updates: Partial<Pick<Workflow, 'title' | 'description' | 'tags' | 'targetAsset' | 'safetyCheck' | 'isPublic' | 'status'>>) => void
     generateWorkflowFromRecommendation: () => void
+    streamWorkflow: (workflow: Workflow) => void
 
     // Actions — Node CRUD
     addNode: (type: WorkflowNodeType, position: { x: number; y: number }, config?: NodeConfig) => string
@@ -415,6 +416,44 @@ export const useWorkflowStore = create<WorkflowBuilderState>()(
                         if (i === nodesToAdd.length - 1) {
                             state.isStreaming = false
                         }
+                    })
+                }, (i + 1) * STREAM_DELAY)
+            })
+        },
+
+        // Stream any pre-built Workflow into the canvas node-by-node.
+        // Same pattern as confirmWorkflowIntent / generateWorkflowFromRecommendation
+        // but accepts any Workflow object — DRY, reusable for any source.
+        streamWorkflow: (workflow) => {
+            const { nodes, edges } = workflow
+
+            // Initialise metadata immediately with empty canvas
+            set((state) => {
+                state.workflow = { ...workflow, nodes: [], edges: [] }
+                state.isStreaming = true
+                state.mode = 'canvas'
+                state.selectedNodeId = null
+            })
+
+            const STREAM_DELAY = 700 // ms between each node
+
+            nodes.forEach((node, i) => {
+                setTimeout(() => {
+                    set((state) => {
+                        if (!state.workflow) return
+
+                        state.workflow.nodes.push(node)
+
+                        // Add any edge whose both endpoints now exist
+                        edges.forEach(e => {
+                            if (state.workflow!.edges.some(ex => ex.id === e.id)) return
+                            const srcExists = state.workflow!.nodes.some(n => n.id === e.source)
+                            const tgtExists = state.workflow!.nodes.some(n => n.id === e.target)
+                            if (srcExists && tgtExists) state.workflow!.edges.push(e)
+                        })
+
+                        state.workflow.updatedAt = new Date().toISOString()
+                        if (i === nodes.length - 1) state.isStreaming = false
                     })
                 }, (i + 1) * STREAM_DELAY)
             })
