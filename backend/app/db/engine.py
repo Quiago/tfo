@@ -1,3 +1,4 @@
+from sqlalchemy import text
 from sqlmodel import SQLModel, Session, create_engine
 
 from app.core.config import settings
@@ -17,6 +18,13 @@ engine = create_engine(
 
 def create_db_and_tables() -> None:
     SQLModel.metadata.create_all(engine)
+    # Manual migrations for columns added after initial table creation.
+    # SQLModel's create_all() never ALTERs existing tables.
+    with engine.connect() as conn:
+        existing = [row[1] for row in conn.execute(text("PRAGMA table_info(users)"))]
+        if "preferred_connector_id" not in existing:
+            conn.execute(text("ALTER TABLE users ADD COLUMN preferred_connector_id TEXT"))
+            conn.commit()
 
 
 def get_session():
