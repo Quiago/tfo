@@ -13,7 +13,12 @@ import {
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useState } from 'react'
 
-// ── Lazy-load the read-only canvas (React Flow has SSR issues) ─────────────────
+// ── Lazy-loaded heavy components (SSR-unsafe: R3F + framer-motion) ────────────
+
+const MaterializationOverlay = dynamic(
+    () => import('@/components/workflow-builder/MaterializationOverlay').then((m) => m.MaterializationOverlay),
+    { ssr: false },
+)
 
 const WorkflowCanvasReadOnly = dynamic(
     () => import('@/components/workflow-builder/WorkflowCanvasReadOnly').then((m) => m.WorkflowCanvasReadOnly),
@@ -281,12 +286,20 @@ export function WorkflowsPanel({
     const [selectedId, setSelectedId] = useState<string | null>(
         highlightOptimization ? 'wf-optim' : null,
     )
+    const [materializing, setMaterializing] = useState(false)
 
     useEffect(() => {
         if (highlightOptimization) setSelectedId('wf-optim')
     }, [highlightOptimization])
 
+    // Trigger the materialisation animation instead of immediately closing
     const handleApprove = useCallback(() => {
+        setMaterializing(true)
+    }, [])
+
+    // Called by MaterializationOverlay when all phases complete
+    const handleMaterializationComplete = useCallback(() => {
+        setMaterializing(false)
         setStatuses((prev) => ({ ...prev, 'wf-optim': 'running' }))
         onClose?.()
     }, [onClose])
@@ -305,26 +318,39 @@ export function WorkflowsPanel({
         ? { ...selectedWorkflow, status: statuses[selectedWorkflow.id] ?? selectedWorkflow.status }
         : null
 
+    // rfWorkflow of the currently selected optimization (for the overlay)
+    const optimRfWorkflow = WORKFLOWS.find((w) => w.id === 'wf-optim')?.rfWorkflow
+
     return (
-        <PanelLayout
-            leftNav={
-                <NavTree
-                    items={navItems}
-                    selectedId={selectedId}
-                    onSelect={(item) => setSelectedId(item.id)}
+        <>
+            {/* Materialisation overlay — rendered outside PanelLayout so it sits at z-[300] */}
+            {materializing && optimRfWorkflow && (
+                <MaterializationOverlay
+                    workflow={optimRfWorkflow}
+                    onComplete={handleMaterializationComplete}
                 />
-            }
-            detail={
-                selectedWithStatus
-                    ? <WorkflowDetail
-                        workflow={selectedWithStatus}
-                        isOptimization={selectedWithStatus.id === 'wf-optim'}
-                        onApprove={handleApprove}
-                        onEditInBuilder={() => handleEditInBuilder(selectedWithStatus.rfWorkflow)}
-                      />
-                    : <WorkflowsOverview statuses={statuses} />
-            }
-        />
+            )}
+
+            <PanelLayout
+                leftNav={
+                    <NavTree
+                        items={navItems}
+                        selectedId={selectedId}
+                        onSelect={(item) => setSelectedId(item.id)}
+                    />
+                }
+                detail={
+                    selectedWithStatus
+                        ? <WorkflowDetail
+                            workflow={selectedWithStatus}
+                            isOptimization={selectedWithStatus.id === 'wf-optim'}
+                            onApprove={handleApprove}
+                            onEditInBuilder={() => handleEditInBuilder(selectedWithStatus.rfWorkflow)}
+                          />
+                        : <WorkflowsOverview statuses={statuses} />
+                }
+            />
+        </>
     )
 }
 

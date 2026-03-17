@@ -2,19 +2,13 @@
 
 import type { NodeMeta, WorkflowNode } from '@/lib/types/workflow'
 import s from '@/styles/workflow/workflow.module.css'
-import * as LucideIcons from 'lucide-react'
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
+import { NodeIcon } from './NodeIcon'
 
 interface OpsFlowNodeData extends WorkflowNode {
     meta: NodeMeta
 }
-
-const NodeIcon = memo(({ name, size = 16 }: { name: string; size?: number }) => {
-    const Icon = (LucideIcons as unknown as Record<string, React.ComponentType<{ size?: number; className?: string }>>)[name]
-    return Icon ? <Icon size={size} /> : null
-})
-NodeIcon.displayName = 'NodeIcon'
 
 function OpsFlowNodeComponent({ data, selected }: NodeProps<OpsFlowNodeData>) {
     const { meta, label, type } = data
