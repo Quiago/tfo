@@ -1,7 +1,11 @@
 import type { LucideIcon } from 'lucide-react'
 import type { TfoModule } from './tfo'
 
-export type SectionId = 'home' | 'people' | 'workflows' | 'events' | 'sensors' | 'logs' | 'docs'
+export type SectionId = 'machine_health' | 'home' | 'people' | 'workflows' | 'events' | 'sensors' | 'logs' | 'docs'
+
+/** SectionId values that have a corresponding panel component in PANEL_REGISTRY.
+ *  'home' is excluded — it renders the native summary+timeline view. */
+export type PanelSectionId = Exclude<SectionId, 'home'>
 
 export interface SectionDef {
     id: SectionId

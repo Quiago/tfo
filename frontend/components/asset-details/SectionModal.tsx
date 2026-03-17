@@ -1,7 +1,7 @@
 'use client'
 
 import { SECTIONS } from '@/lib/constants/asset-tree-sections'
-import type { SectionId, SectionPanelProps } from '@/lib/types/asset-tree'
+import type { PanelSectionId, SectionId, SectionPanelProps } from '@/lib/types/asset-tree'
 import type { TfoModule } from '@/lib/types/tfo'
 import { X } from 'lucide-react'
 import { useCallback, useEffect } from 'react'
@@ -17,7 +17,9 @@ interface SectionModalProps {
 export function SectionModal({ sectionId, onClose, highlightOptimization, onNavigateToModule }: SectionModalProps) {
     const section = SECTIONS.find((s) => s.id === sectionId)!
     const Icon = section.icon
-    const Panel = PANEL_REGISTRY[sectionId]
+    // 'home' has no panel (renders summary+timeline) — SectionModal should not be called with it, but guard anyway
+    const Panel = sectionId !== 'home' ? PANEL_REGISTRY[sectionId as PanelSectionId] : null
+    if (!Panel) return null
 
     // Close on Escape
     useEffect(() => {
