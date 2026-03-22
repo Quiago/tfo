@@ -506,7 +506,7 @@ export function useConnectorTimeline(
                 }
             } catch (err) {
                 if (err instanceof ApiError && err.status === 404) {
-                    clearCachedMappings(connectorId!);
+                    clearPersistedMappings(connectorId!);
                     setStatus('not_found');
                     setErrorDetail(`HTTP 404: ${err.message}`);
                     return;
