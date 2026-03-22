@@ -1,4 +1,5 @@
 import type { VoiceWorkflowIntent, Workflow } from '@/lib/types/workflow'
+import { useAuthStore } from '@/lib/store/auth-store'
 
 // ─── Sample Workflow: Vibration Diagnosis ────────────────────────
 export const MOCK_WORKFLOW_VIBRATION: Workflow = {
@@ -232,12 +233,54 @@ export const MOCK_WORKFLOWS: Workflow[] = [
     MOCK_WORKFLOW_RACK_INSPECTION,
 ]
 
-// ─── Hook for playground use ─────────────────────────────────────
+// ─── Datacenter voice intent (UPS battery alert) ──────────────────
+export const MOCK_VOICE_INTENT_DC: VoiceWorkflowIntent = {
+    title: 'UPS Battery Degradation Response',
+    description: 'Automated response when UPS battery health drops below threshold',
+    targetAsset: {
+        type: 'server',
+        brand: 'Vertiv',
+        model: 'GXYDN 80kVA',
+        tags: ['ups', 'power', 'battery'],
+    },
+    trigger: {
+        type: 'voice_trigger',
+        keywords: ['UPS alert', 'battery health', 'battery low'],
+    },
+    steps: [
+        {
+            type: 'checklist_gate',
+            label: 'Check UPS Battery SoH',
+            config: { items: [{ id: 'chk_1', label: 'Read state-of-health from UPS display', required: true }] },
+        },
+        {
+            type: 'decision',
+            label: 'SoH below 80%?',
+            config: { condition: 'soh < 80', trueLabel: 'Yes', falseLabel: 'No' },
+        },
+        {
+            type: 'checklist_gate',
+            label: 'Schedule Battery Replacement',
+            config: { items: [{ id: 'chk_3', label: 'Create procurement request for replacement cells', required: true }] },
+        },
+    ],
+    safetyCheck: { requiresLoto: true, ppeRequired: ['insulated_gloves', 'safety_glasses'] },
+}
+
+// ─── Datacenter workflows list ─────────────────────────────────────
+export const MOCK_WORKFLOWS_DC: Workflow[] = [
+    MOCK_WORKFLOW_RACK_INSPECTION,
+]
+
+// ─── Hook ─────────────────────────────────────────────────────────
 export function useWorkflowMockData() {
+    const platformMode = useAuthStore((s) => s.platformMode)
+    const isDatacenter = platformMode === 'datacenter'
+
     return {
-        workflows: MOCK_WORKFLOWS,
-        sampleIntent: MOCK_VOICE_INTENT,
+        workflows:        isDatacenter ? MOCK_WORKFLOWS_DC      : MOCK_WORKFLOWS,
+        sampleIntent:     isDatacenter ? MOCK_VOICE_INTENT_DC   : MOCK_VOICE_INTENT,
         vibrationWorkflow: MOCK_WORKFLOW_VIBRATION,
-        rackWorkflow: MOCK_WORKFLOW_RACK_INSPECTION,
+        rackWorkflow:     MOCK_WORKFLOW_RACK_INSPECTION,
     }
 }

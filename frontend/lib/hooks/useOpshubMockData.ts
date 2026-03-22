@@ -1,4 +1,5 @@
 import { useOpshubStore } from '@/lib/store/opshub-store'
+import { useAuthStore } from '@/lib/store/auth-store'
 import type {
     ActivityEntry,
     AIAgentRecommendation,
@@ -14,7 +15,20 @@ import type {
     WorkOrderCard,
     WorkOrderTask,
 } from '@/lib/types/opshub'
-import { useEffect, useMemo } from 'react'
+import {
+    DC_MOCK_TEAM,
+    DC_MOCK_FACTORIES,
+    DC_MOCK_REPOS,
+    DC_MOCK_FEED,
+    DC_MOCK_ANOMALIES,
+    DC_MOCK_CHANGELOG,
+    DC_ALL_MOCK_WORK_ORDERS,
+    DC_MOCK_ACTIVITY_ENTRIES,
+    DC_MOCK_DISCUSSION,
+    DC_EXECUTION_CHECKLIST,
+    DC_MOCK_AI_RECOMMENDATION,
+} from '@/lib/content/opshub-dc-mock'
+import { useEffect, useMemo, useRef } from 'react'
 
 // ─── Mock Team ──────────────────────────────────────────────────
 export const MOCK_TEAM: TeamMember[] = [
@@ -1152,31 +1166,49 @@ const MOCK_AI_RECOMMENDATION: AIAgentRecommendation = {
 // ─── Hook ────────────────────────────────────────────────────────
 export function useOpshubMockData() {
     const store = useOpshubStore()
+    const platformMode = useAuthStore((s) => s.platformMode)
+    // Track last seeded mode to re-seed only when mode changes
+    const lastSeededMode = useRef<string | null>(null)
+
+    const isDatacenter = platformMode === 'datacenter'
+
+    const factories       = isDatacenter ? DC_MOCK_FACTORIES       : MOCK_FACTORIES
+    const repos           = isDatacenter ? DC_MOCK_REPOS            : MOCK_REPOS
+    const feed            = isDatacenter ? DC_MOCK_FEED             : MOCK_FEED
+    const anomalies       = isDatacenter ? DC_MOCK_ANOMALIES        : MOCK_ANOMALIES
+    const changelog       = isDatacenter ? DC_MOCK_CHANGELOG        : MOCK_CHANGELOG
+    const workOrders      = isDatacenter ? DC_ALL_MOCK_WORK_ORDERS  : ALL_MOCK_WORK_ORDERS
+    const activityEntries = isDatacenter ? DC_MOCK_ACTIVITY_ENTRIES : MOCK_ACTIVITY_ENTRIES
+    const discussion      = isDatacenter ? DC_MOCK_DISCUSSION       : MOCK_DISCUSSION
+    const execChecklist   = isDatacenter ? DC_EXECUTION_CHECKLIST   : MOCK_EXECUTION_CHECKLIST
+    const aiRec           = isDatacenter ? DC_MOCK_AI_RECOMMENDATION : MOCK_AI_RECOMMENDATION
+    const team            = isDatacenter ? DC_MOCK_TEAM             : MOCK_TEAM
 
     useEffect(() => {
-        if (store.factories.length === 0) {
-            store.setFactories(MOCK_FACTORIES)
-            store.setWorkflowRepos(MOCK_REPOS)
-            store.setFeed(MOCK_FEED)
-            store.setAnomalies(MOCK_ANOMALIES)
-            store.setChangelog(MOCK_CHANGELOG)
-            store.setWorkOrders(ALL_MOCK_WORK_ORDERS)
-            store.setActivityEntries(MOCK_ACTIVITY_ENTRIES)
-            store.setDiscussionComments(MOCK_DISCUSSION)
-            store.setExecutionChecklists([MOCK_EXECUTION_CHECKLIST])
-            store.setAIRecommendations([MOCK_AI_RECOMMENDATION])
-            store.setCurrentUser(MOCK_TEAM[0]) // Default: Sarah Chen
-        }
-    }, [store])
+        if (lastSeededMode.current === platformMode) return
+        lastSeededMode.current = platformMode
+
+        store.setFactories(factories)
+        store.setWorkflowRepos(repos)
+        store.setFeed(feed)
+        store.setAnomalies(anomalies)
+        store.setChangelog(changelog)
+        store.setWorkOrders(workOrders)
+        store.setActivityEntries(activityEntries)
+        store.setDiscussionComments(discussion)
+        store.setExecutionChecklists([execChecklist])
+        store.setAIRecommendations([aiRec])
+        store.setCurrentUser(team[0])
+    }, [platformMode, store, factories, repos, feed, anomalies, changelog, workOrders, activityEntries, discussion, execChecklist, aiRec, team])
 
     const stats = useMemo(() => ({
-        totalFactories: MOCK_FACTORIES.length,
-        totalWorkflows: MOCK_REPOS.length,
-        totalPosts: MOCK_FEED.length,
-        pendingAnomalies: MOCK_ANOMALIES.filter(a => a.status === 'pending').length,
-        totalWorkOrders: ALL_MOCK_WORK_ORDERS.length,
-        totalTeamMembers: MOCK_TEAM.length,
-    }), [])
+        totalFactories: factories.length,
+        totalWorkflows: repos.length,
+        totalPosts: feed.length,
+        pendingAnomalies: anomalies.filter(a => a.status === 'pending').length,
+        totalWorkOrders: workOrders.length,
+        totalTeamMembers: team.length,
+    }), [factories, repos, feed, anomalies, workOrders, team])
 
     return { stats, isInitialized: store.factories.length > 0 }
 }

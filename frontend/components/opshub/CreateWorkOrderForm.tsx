@@ -1,9 +1,11 @@
 'use client'
 
 import { MOCK_TEAM } from '@/lib/hooks/useOpshubMockData'
+import { useAuthStore } from '@/lib/store/auth-store'
+import { useTfoStore } from '@/lib/store/tfo-store'
 import type { TaskPriority } from '@/lib/types/opshub'
 import { ArrowLeft, ClipboardPlus, User, X } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import styles from '../../styles/opshub/work-orders.module.css'
 
 export interface WorkOrderFormData {
@@ -34,17 +36,15 @@ const PRIORITIES: { value: TaskPriority; label: string; color: string }[] = [
     { value: 'critical', label: 'Critical', color: 'bg-red-500' },
 ]
 
-const FACILITIES = [
-    'Munich Paint Shop',
-    'Detroit Assembly',
-    'Shenzhen Electronics',
-    'CDMX Stamping',
-    'Riyadh Cooling Systems',
-    'Tokyo Innovation Lab',
-    'São Paulo Hub',
-]
-
 export function CreateWorkOrderForm({ initialData, prefillEquipment, onSubmit, onCancel }: CreateWorkOrderFormProps) {
+    const platformMode = useAuthStore((s) => s.platformMode)
+    const locations    = useTfoStore((s) => s.locations)
+
+    // Derive facilities list from tfo-store locations, filtered by current mode
+    const FACILITIES = useMemo(
+        () => locations.filter((l) => l.mode === platformMode).map((l) => l.name),
+        [locations, platformMode]
+    )
     // Section 1: Work Order Details
     const [title, setTitle] = useState(initialData?.title || (prefillEquipment ? `Maintenance — ${prefillEquipment}` : ''))
     const [description, setDescription] = useState(initialData?.description || '')
@@ -55,8 +55,22 @@ export function CreateWorkOrderForm({ initialData, prefillEquipment, onSubmit, o
     const [tags, setTags] = useState<string[]>(initialData?.tags || (prefillEquipment ? ['maintenance'] : []))
 
     // Section 2: Initial Task Assignment
+    const defaultInstructions = platformMode === 'datacenter'
+        ? 'Perform infrastructure inspection based on the anomaly report.'
+        : 'Perform physical inspection of the bearing assembly based on the anomaly report.'
     const [assigneeId, setAssigneeId] = useState<string>('')
-    const [taskInstructions, setTaskInstructions] = useState('Perform physical inspection of the bearing assembly based on the anomaly report.')
+    const [taskInstructions, setTaskInstructions] = useState(defaultInstructions)
+
+    // Sync facility and instructions when platform mode changes
+    useEffect(() => {
+        if (!initialData?.facility) setFacility(FACILITIES[0] ?? '')
+        if (!initialData) setTaskInstructions(
+            platformMode === 'datacenter'
+                ? 'Perform infrastructure inspection based on the anomaly report.'
+                : 'Perform physical inspection of the bearing assembly based on the anomaly report.'
+        )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [platformMode, FACILITIES])
 
     const [errors, setErrors] = useState<Record<string, string>>({})
 
