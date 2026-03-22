@@ -1,4 +1,5 @@
 import type { ActiveAlert, FacilityMetric, RecentWorkflow, SystemUpdate, TfoModule } from '@/lib/types/tfo'
+import type { PlatformMode } from '@/lib/content/platform-content'
 import { create } from 'zustand'
 
 export interface FacilityLocation {
@@ -6,16 +7,22 @@ export interface FacilityLocation {
     name: string
     region: string
     type: string
+    /** Drives which PlatformContent is active when this location is selected */
+    mode: PlatformMode
 }
 
 const LOCATIONS: FacilityLocation[] = [
-    { id: 'muc-01', name: 'Munich Paint Shop', region: 'EU-Central', type: 'Automotive' },
-    { id: 'det-01', name: 'Detroit Assembly', region: 'US-East', type: 'Automotive' },
-    { id: 'shz-01', name: 'Shenzhen Electronics', region: 'AP-East', type: 'Manufacturing' },
-    { id: 'cdmx-01', name: 'CDMX Stamping Plant', region: 'LATAM', type: 'Automotive' },
-    { id: 'ryd-01', name: 'Riyadh Cooling Systems', region: 'ME-Central', type: 'HVAC/Datacenter' },
-    { id: 'tky-01', name: 'Tokyo Innovation Lab', region: 'AP-East', type: 'R&D' },
-    { id: 'gru-01', name: 'São Paulo Hub', region: 'LATAM-South', type: 'Manufacturing' },
+    // ── Factory locations ─────────────────────────────────────────────────────
+    { id: 'muc-01',    name: 'Munich Paint Shop',     region: 'EU-Central',  type: 'Automotive',    mode: 'factory' },
+    { id: 'det-01',    name: 'Detroit Assembly',       region: 'US-East',     type: 'Automotive',    mode: 'factory' },
+    { id: 'shz-01',    name: 'Shenzhen Electronics',  region: 'AP-East',     type: 'Manufacturing', mode: 'factory' },
+    { id: 'cdmx-01',   name: 'CDMX Stamping Plant',   region: 'LATAM',       type: 'Automotive',    mode: 'factory' },
+    { id: 'gru-01',    name: 'São Paulo Hub',          region: 'LATAM-South', type: 'Manufacturing', mode: 'factory' },
+    // ── Datacenter locations ──────────────────────────────────────────────────
+    { id: 'ryd-dc-01', name: 'Riyadh Data Center',    region: 'ME-Central',  type: 'Tier III DC',   mode: 'datacenter' },
+    { id: 'fra-dc-01', name: 'Frankfurt DC Campus',   region: 'EU-Central',  type: 'Tier IV DC',    mode: 'datacenter' },
+    { id: 'nyc-dc-01', name: 'New York Exchange DC',  region: 'US-East',     type: 'Tier III DC',   mode: 'datacenter' },
+    { id: 'sgp-dc-01', name: 'Singapore Cloud Hub',   region: 'AP-East',     type: 'Tier IV DC',    mode: 'datacenter' },
 ]
 
 // Per-location mock data
@@ -96,13 +103,14 @@ const FACILITY_DATA: Record<string, {
             { id: 'w3', name: 'Tonnage Calibration', status: 'completed', timeAgo: '1h ago' },
         ],
     },
-    'ryd-01': {
+    // ── Datacenter locations ─────────────────────────────────────────────────
+    'ryd-dc-01': {
         metrics: [
-            { label: 'OEE', value: '88.7', unit: '%', status: 'normal' },
+            { label: 'PUE', value: '1.28', status: 'normal' },
             { label: 'Cooling Eff.', value: '94.2', unit: '%', status: 'normal' },
             { label: 'Chillers Online', value: '12/12', status: 'normal' },
             { label: 'Ambient Temp', value: '44', unit: 'C', status: 'warning' },
-            { label: 'PUE', value: '1.28', status: 'normal' },
+            { label: 'Power Capacity', value: '68', unit: '%', status: 'normal' },
             { label: 'Uptime', value: '99.6', unit: '%', status: 'normal' },
         ],
         alerts: [
@@ -111,6 +119,55 @@ const FACILITY_DATA: Record<string, {
         workflows: [
             { id: 'w1', name: 'Chiller Optimization Cycle', status: 'running', timeAgo: '3m ago' },
             { id: 'w2', name: 'Filter Replacement — AHU-7', status: 'completed', timeAgo: '45m ago' },
+        ],
+    },
+    'fra-dc-01': {
+        metrics: [
+            { label: 'PUE', value: '1.22', status: 'normal' },
+            { label: 'Servers Online', value: '1248/1248', status: 'normal' },
+            { label: 'Power Usage', value: '4.2', unit: 'MW', status: 'normal' },
+            { label: 'Cooling Eff.', value: '96.8', unit: '%', status: 'normal' },
+            { label: 'Avg Temp', value: '22.1', unit: 'C', status: 'normal' },
+            { label: 'Uptime', value: '99.99', unit: '%', status: 'normal' },
+        ],
+        alerts: [],
+        workflows: [
+            { id: 'w1', name: 'Capacity Planning Review', status: 'completed', timeAgo: '10m ago' },
+            { id: 'w2', name: 'Firmware Patch — Batch 12', status: 'completed', timeAgo: '1h ago' },
+        ],
+    },
+    'nyc-dc-01': {
+        metrics: [
+            { label: 'PUE', value: '1.35', status: 'warning' },
+            { label: 'Servers Online', value: '892/900', status: 'warning' },
+            { label: 'Power Usage', value: '6.8', unit: 'MW', status: 'warning' },
+            { label: 'Cooling Eff.', value: '91.3', unit: '%', status: 'warning' },
+            { label: 'Avg Temp', value: '24.7', unit: 'C', status: 'warning' },
+            { label: 'Uptime', value: '99.95', unit: '%', status: 'normal' },
+        ],
+        alerts: [
+            { id: 'a1', zone: 'Row C', sensor: 'Temperature', severity: 'warning', message: 'Rack C-14 intake temp at 27.3C — above threshold', timeAgo: '4m ago' },
+            { id: 'a2', zone: 'UPS Room', sensor: 'Battery', severity: 'critical', message: 'UPS-3 battery health degraded (67%) — replacement due', timeAgo: '22m ago' },
+        ],
+        workflows: [
+            { id: 'w1', name: 'UPS Battery Replacement', status: 'running', timeAgo: '20m ago' },
+            { id: 'w2', name: 'Cooling Rebalance — Row C', status: 'running', timeAgo: '4m ago' },
+            { id: 'w3', name: 'Capacity Audit', status: 'completed', timeAgo: '2h ago' },
+        ],
+    },
+    'sgp-dc-01': {
+        metrics: [
+            { label: 'PUE', value: '1.19', status: 'normal' },
+            { label: 'Servers Online', value: '2048/2048', status: 'normal' },
+            { label: 'Power Usage', value: '9.1', unit: 'MW', status: 'normal' },
+            { label: 'Cooling Eff.', value: '98.1', unit: '%', status: 'normal' },
+            { label: 'Avg Temp', value: '21.4', unit: 'C', status: 'normal' },
+            { label: 'Uptime', value: '99.999', unit: '%', status: 'normal' },
+        ],
+        alerts: [],
+        workflows: [
+            { id: 'w1', name: 'Predictive Cooling Adjustment', status: 'completed', timeAgo: '15m ago' },
+            { id: 'w2', name: 'Energy Report — Q1', status: 'completed', timeAgo: '3h ago' },
         ],
     },
     'tky-01': {

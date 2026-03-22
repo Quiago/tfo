@@ -12,3 +12,4 @@ class User(SQLModel, table=True):
     is_active: bool = Field(default=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     preferred_connector_id: str | None = Field(default=None)
+    platform_mode: str = Field(default='factory')

@@ -1,6 +1,8 @@
 'use client'
 
 import type { TfoModule } from '@/lib/types/tfo'
+import { PLATFORM_CONTENT } from '@/lib/content/platform-content'
+import { useAuthStore } from '@/lib/store/auth-store'
 import rp from '@/styles/overview/right-panel.module.css'
 import { AlertTriangle, ArrowRight, CheckCircle2 } from 'lucide-react'
 import {
@@ -45,11 +47,14 @@ export function RightPanel({
     onNavigate,
     activeAlerts,
 }: RightPanelProps) {
+    const platformMode = useAuthStore((s) => s.platformMode)
+    const { rightPanel } = PLATFORM_CONTENT[platformMode]
+
     return (
         <aside className={rp.rightPanel}>
-            {/* 1. Production Efficieny (Stacked Area) */}
+            {/* 1. Efficiency Chart (Stacked Area) */}
             <div className={`${rp.card} h-[28%]`}>
-                <div className={rp.cardTitle}>Production Efficiency (Last 7d)</div>
+                <div className={rp.cardTitle}>{rightPanel.chart1Title}</div>
                 <div className={`${rp.chartContainer} h-[calc(100%-20px)]`}>
                     <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                         <AreaChart data={PRODUCTION_DATA}>
@@ -89,10 +94,10 @@ export function RightPanel({
                 </div>
             </div>
 
-            {/* 2. Energy Consumption (Grouped Bar) */}
+            {/* 2. Consumption Chart (Grouped Bar) */}
             <div className={`${rp.card} h-[28%]`}>
                 <div className="flex justify-between items-start mb-2">
-                    <div className={rp.cardTitle}>Energy Consumption</div>
+                    <div className={rp.cardTitle}>{rightPanel.chart2Title}</div>
                     <div className={rp.chartLegend}>
                         <span className={rp.legendDot}>
                             <span className={`${rp.legendDotCircle} bg-emerald-300`} /> D1
@@ -136,7 +141,7 @@ export function RightPanel({
 
             {/* 3. Active Alerts (Scrollable List) */}
             <div className={`${rp.card} flex-1 min-h-0 flex flex-col`}>
-                <div className={rp.cardTitle}>Active Alerts</div>
+                <div className={rp.cardTitle}>{rightPanel.alertsTitle}</div>
                 <div className="flex-1 overflow-y-auto pr-1 space-y-1">
                     {activeAlerts.map(alert => (
                         <div key={alert.id} className={rp.alertItem}>
@@ -164,31 +169,23 @@ export function RightPanel({
                 </div>
             </div>
 
-            {/* 4. Factory Status */}
+            {/* 4. Facility Status — label and items driven by platformMode */}
             <div className={`${rp.card} h-[14%] flex flex-col justify-center`}>
-                <div className={rp.cardTitle}>Factory Status</div>
+                <div className={rp.cardTitle}>{rightPanel.statusTitle}</div>
                 <div className="space-y-2">
-                    <div className={rp.factoryStatus}>
-                        <div className="flex items-center gap-2">
-                            <div className={`${rp.statusDot} ${rp.statusOnline}`} />
-                            Robot Arms
+                    {rightPanel.statusItems.map((item) => (
+                        <div key={item.label} className={rp.factoryStatus}>
+                            <div className="flex items-center gap-2">
+                                <div className={`${rp.statusDot} ${
+                                    item.status === 'online'  ? rp.statusOnline  :
+                                    item.status === 'error'   ? rp.statusError   :
+                                    rp.statusWarning ?? rp.statusOnline
+                                }`} />
+                                {item.label}
+                            </div>
+                            <span className="text-xs font-mono text-slate-500">{item.value}</span>
                         </div>
-                        <span className="text-xs font-mono text-slate-500">18/20 Online</span>
-                    </div>
-                    <div className={rp.factoryStatus}>
-                        <div className="flex items-center gap-2">
-                            <div className={`${rp.statusDot} ${rp.statusError}`} />
-                            Conveyor System
-                        </div>
-                        <span className="text-xs font-mono text-slate-500">Maintenance</span>
-                    </div>
-                    <div className={rp.factoryStatus}>
-                        <div className="flex items-center gap-2">
-                            <div className={`${rp.statusDot} ${rp.statusOnline}`} />
-                            Paint Booth
-                        </div>
-                        <span className="text-xs font-mono text-slate-500">Nominal</span>
-                    </div>
+                    ))}
                 </div>
             </div>
         </aside>

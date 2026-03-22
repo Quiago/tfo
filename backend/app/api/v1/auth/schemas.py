@@ -16,6 +16,7 @@ class UserResponse(BaseModel):
     email: str
     is_active: bool
     preferred_connector_id: str | None = None
+    platform_mode: str = 'factory'
     model_config = {"from_attributes": True}
 
 
@@ -26,3 +27,4 @@ class TokenResponse(BaseModel):
 
 class PreferencesUpdate(BaseModel):
     preferred_connector_id: str | None = None
+    platform_mode: str | None = None

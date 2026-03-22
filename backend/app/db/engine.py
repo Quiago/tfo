@@ -26,6 +26,10 @@ def create_db_and_tables() -> None:
             conn.execute(text("ALTER TABLE users ADD COLUMN preferred_connector_id TEXT"))
             conn.commit()
 
+        if "platform_mode" not in user_cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN platform_mode TEXT NOT NULL DEFAULT 'factory'"))
+            conn.commit()
+
         connector_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(connector)"))]
         if "node_mappings" not in connector_cols:
             conn.execute(text("ALTER TABLE connector ADD COLUMN node_mappings JSON"))

@@ -4,6 +4,7 @@ import { useAuthStore } from '@/lib/store/auth-store'
 import { resolveAssetMeta } from '@/lib/constants/asset-meta'
 import { type FacilityLocation } from '@/lib/store/tfo-store'
 import type { TfoModule } from '@/lib/types/tfo'
+import { PLATFORM_CONTENT } from '@/lib/content/platform-content'
 import nav from '@/styles/navbar/navbar.module.css'
 import {
     Activity,
@@ -14,17 +15,19 @@ import {
     MapPin,
     RefreshCw,
     Search,
+    Server,
     Workflow
 } from 'lucide-react'
 import React, { useState } from 'react'
 
 // ─── Constants ──────────────────────────────────────────────────────────────
-export const MODULES: { id: TfoModule; label: string; icon: React.ReactNode; description: string }[] = [
-    { id: 'overview', label: 'Overview', icon: <LayoutGrid size={16} />, description: 'Facility dashboard' },
-    { id: 'timeline', label: 'Timeline', icon: <Activity size={16} />, description: 'Sensor time-series' },
-    { id: 'workflows', label: 'Workflows', icon: <Workflow size={16} />, description: 'Process automation' },
-    { id: 'opshub', label: 'OpsHub', icon: <LayoutDashboard size={16} />, description: 'Cross-facility ops' },
-    { id: 'updates', label: 'Updates', icon: <RefreshCw size={16} />, description: 'Latest automations' },
+// Module labels are static; descriptions are content-driven (see Navbar component).
+export const MODULES: { id: TfoModule; label: string; icon: React.ReactNode }[] = [
+    { id: 'overview',  label: 'Overview',  icon: <LayoutGrid size={16} /> },
+    { id: 'timeline',  label: 'Timeline',  icon: <Activity size={16} /> },
+    { id: 'workflows', label: 'Workflows', icon: <Workflow size={16} /> },
+    { id: 'opshub',    label: 'OpsHub',    icon: <LayoutDashboard size={16} /> },
+    { id: 'updates',   label: 'Updates',   icon: <RefreshCw size={16} /> },
 ]
 
 // ─── Subcomponents ──────────────────────────────────────────────────────────
@@ -50,6 +53,33 @@ function UserAvatar({ className }: { className?: string }) {
     )
 }
 
+// ─── LocationOption subcomponent ────────────────────────────────────────────
+function LocationOption({
+    loc,
+    isActive,
+    accentClass,
+    activeClass,
+    onSelect,
+}: {
+    loc: FacilityLocation
+    isActive: boolean
+    accentClass: string
+    activeClass: string
+    onSelect: () => void
+}) {
+    return (
+        <button
+            onClick={onSelect}
+            className={`w-full text-left px-4 py-2 text-sm hover:bg-zinc-50 flex items-center gap-3 transition-colors
+                ${isActive ? `${activeClass} font-medium` : 'text-zinc-700'}`}
+        >
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isActive ? accentClass : 'bg-zinc-300'}`} />
+            <span className="truncate">{loc.name}</span>
+            <span className="ml-auto text-[10px] text-zinc-400 flex-shrink-0">{loc.region}</span>
+        </button>
+    )
+}
+
 // ─── Navbar Component ───────────────────────────────────────────────────────
 export function Navbar({
     activeModule,
@@ -69,8 +99,17 @@ export function Navbar({
 }) {
     const [dropdownOpen, setDropdownOpen] = useState(false)
     const [userMenuOpen, setUserMenuOpen] = useState(false)
-    const { email, name, role, initials, clear } = useAuthStore()
+    const { email, name, role, initials, clear, platformMode } = useAuthStore()
     const assetMeta = focusedAsset ? resolveAssetMeta(focusedAsset) : null
+
+    const content = PLATFORM_CONTENT[platformMode]
+    const moduleDescriptions = content.moduleDescriptions
+
+    // Partition locations into groups for the dropdown
+    const factoryLocations  = locations.filter((l) => l.mode === 'factory')
+    const datacenterLocations = locations.filter((l) => l.mode === 'datacenter')
+
+    const OpsIcon = platformMode === 'datacenter' ? Server : LayoutGrid
 
     return (
         <nav className={nav.navbar}>
@@ -82,10 +121,10 @@ export function Navbar({
 
             <div className={nav.navSep} />
 
-            {/* Operations Label */}
+            {/* Operations / Infrastructure Label — driven by platformMode */}
             <div className={nav.navOps}>
-                <LayoutGrid size={16} />
-                <span className={nav.navOpsText}>Operations</span>
+                <OpsIcon size={16} />
+                <span className={nav.navOpsText}>{content.navOpsLabel}</span>
             </div>
 
             {/* Modules Pill */}
@@ -93,7 +132,7 @@ export function Navbar({
                 {MODULES.map((mod) => (
                     <button
                         key={mod.id}
-                        title={mod.description}
+                        title={moduleDescriptions[mod.id as keyof typeof moduleDescriptions]}
                         onClick={() => onModuleChange(mod.id)}
                         className={activeModule === mod.id ? nav.moduleBtnActive : nav.moduleBtn}
                     >
@@ -127,8 +166,8 @@ export function Navbar({
             {/* Spacer */}
             <div className={nav.spacer} />
 
-            {/* Factory Selector */}
-            <div className={`relative`}>
+            {/* Location Selector — groups Factory / Datacenter locations */}
+            <div className="relative">
                 <button
                     onClick={() => setDropdownOpen(!dropdownOpen)}
                     className={nav.factoryPill}
@@ -138,25 +177,47 @@ export function Navbar({
                     <ChevronDown size={14} className={`transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
                 </button>
 
-                {/* Dropdown Menu */}
+                {/* Dropdown Menu — two grouped sections */}
                 {dropdownOpen && (
                     <>
                         <div className="fixed inset-0 z-40" onClick={() => setDropdownOpen(false)} />
-                        <div className="absolute top-full right-0 mt-2 w-56 rounded-xl border border-zinc-200 bg-white shadow-xl overflow-hidden z-50 py-1">
-                            {locations.map(loc => (
-                                <button
+                        <div className="absolute top-full right-0 mt-2 w-64 rounded-xl border border-zinc-200 bg-white shadow-xl overflow-hidden z-50 py-1">
+
+                            {/* Factory group */}
+                            <div className="px-3 pt-2 pb-1">
+                                <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+                                    {content.locationGroups.factory}
+                                </span>
+                            </div>
+                            {factoryLocations.map((loc) => (
+                                <LocationOption
                                     key={loc.id}
-                                    onClick={() => {
-                                        onLocationChange(loc.id)
-                                        setDropdownOpen(false)
-                                    }}
-                                    className={`w-full text-left px-4 py-2.5 text-sm hover:bg-zinc-50 flex items-center gap-3 transition-colors
-                                    ${activeLocation.id === loc.id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-zinc-700'}
-                                `}
-                                >
-                                    <span className={`w-2 h-2 rounded-full ${activeLocation.id === loc.id ? 'bg-indigo-500' : 'bg-zinc-300'}`} />
-                                    {loc.name}
-                                </button>
+                                    loc={loc}
+                                    isActive={activeLocation.id === loc.id}
+                                    accentClass="bg-indigo-500"
+                                    activeClass="bg-indigo-50 text-indigo-700"
+                                    onSelect={() => { onLocationChange(loc.id); setDropdownOpen(false) }}
+                                />
+                            ))}
+
+                            {/* Separator */}
+                            <div className="my-1 border-t border-zinc-100" />
+
+                            {/* Datacenter group */}
+                            <div className="px-3 pt-1 pb-1">
+                                <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+                                    {content.locationGroups.datacenter}
+                                </span>
+                            </div>
+                            {datacenterLocations.map((loc) => (
+                                <LocationOption
+                                    key={loc.id}
+                                    loc={loc}
+                                    isActive={activeLocation.id === loc.id}
+                                    accentClass="bg-violet-500"
+                                    activeClass="bg-violet-50 text-violet-700"
+                                    onSelect={() => { onLocationChange(loc.id); setDropdownOpen(false) }}
+                                />
                             ))}
                         </div>
                     </>

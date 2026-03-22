@@ -43,7 +43,11 @@ def login(session: Session, data: UserLogin) -> str:
 
 
 def update_preferences(session: Session, user: User, data: PreferencesUpdate) -> User:
-    user.preferred_connector_id = data.preferred_connector_id
+    # Only update fields that were explicitly included in the request payload
+    if "preferred_connector_id" in data.model_fields_set:
+        user.preferred_connector_id = data.preferred_connector_id
+    if "platform_mode" in data.model_fields_set and data.platform_mode is not None:
+        user.platform_mode = data.platform_mode
     session.add(user)
     session.commit()
     session.refresh(user)

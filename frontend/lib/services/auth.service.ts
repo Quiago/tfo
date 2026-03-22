@@ -10,6 +10,7 @@ export interface UserResponse {
   email: string;
   is_active: boolean;
   preferred_connector_id: string | null;
+  platform_mode: string | null;
 }
 
 export async function login(email: string, password: string): Promise<TokenResponse> {
@@ -30,9 +31,14 @@ export async function getMe(): Promise<UserResponse> {
   return apiFetch<UserResponse>('/auth/me');
 }
 
-export async function updatePreferences(preferred_connector_id: string | null): Promise<UserResponse> {
+export interface PreferencesPayload {
+  preferred_connector_id?: string | null;
+  platform_mode?: string | null;
+}
+
+export async function updatePreferences(payload: PreferencesPayload): Promise<UserResponse> {
   return apiFetch<UserResponse>('/auth/me/preferences', {
     method: 'PATCH',
-    body: JSON.stringify({ preferred_connector_id }),
+    body: JSON.stringify(payload),
   });
 }

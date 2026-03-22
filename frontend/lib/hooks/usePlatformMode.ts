@@ -1,27 +1,27 @@
 'use client'
 
 /**
- * Syncs `activeConnectorId` between the backend and the timeline store.
+ * Syncs `platformMode` between the backend and the auth store.
  *
  * On mount (after auth hydration): fetches /auth/me and seeds the store
- * with the server-side preferred_connector_id (only if the store is empty).
+ * with the server-side platform_mode (source of truth for cross-machine sync).
  *
- * On every connector change: PATCHes /auth/me/preferences so the choice
+ * On every platformMode change: PATCHes /auth/me/preferences so the choice
  * persists server-side and survives across machines / incognito sessions.
  */
 import { useEffect, useRef } from 'react'
 import { useAuthStore } from '@/lib/store/auth-store'
-import { useTimelineStore } from '@/lib/store/timeline-store'
 import { getMe, updatePreferences } from '@/lib/services/auth.service'
+import type { PlatformMode } from '@/lib/content/platform-content'
 
-export function useConnectorPreference() {
+export function usePlatformMode() {
     const token = useAuthStore((s) => s.token)
-    const { activeConnectorId, setActiveConnectorId } = useTimelineStore()
+    const { platformMode, setPlatformMode } = useAuthStore()
 
     // Track whether we've seeded the store from the backend this session.
     const seeded = useRef(false)
     // Track the last value we pushed to the backend to avoid redundant PATCHes.
-    const lastSynced = useRef<string | undefined | null>(undefined)
+    const lastSynced = useRef<PlatformMode | undefined>(undefined)
 
     // Seed from backend once on login / page load
     useEffect(() => {
@@ -30,24 +30,23 @@ export function useConnectorPreference() {
 
         getMe()
             .then((user) => {
-                const serverValue = user.preferred_connector_id ?? undefined
-                // Always honour the server value — it's the source of truth
-                setActiveConnectorId(serverValue)
+                const serverValue = (user.platform_mode ?? 'factory') as PlatformMode
+                setPlatformMode(serverValue)
                 lastSynced.current = serverValue
             })
             .catch(() => {
                 // Network error — leave the local store value as-is
             })
-    }, [token, setActiveConnectorId])
+    }, [token, setPlatformMode])
 
-    // Persist changes back to the server whenever the connector changes
+    // Persist changes back to the server whenever the mode changes
     useEffect(() => {
         if (!token || !seeded.current) return
-        if (activeConnectorId === lastSynced.current) return
+        if (platformMode === lastSynced.current) return
 
-        lastSynced.current = activeConnectorId
-        updatePreferences({ preferred_connector_id: activeConnectorId ?? null }).catch(() => {
+        lastSynced.current = platformMode
+        updatePreferences({ platform_mode: platformMode }).catch(() => {
             // Fire-and-forget — store already has the value locally
         })
-    }, [token, activeConnectorId])
+    }, [token, platformMode])
 }

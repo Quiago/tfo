@@ -11,8 +11,10 @@ import { UpdatesView } from '@/components/updates/UpdatesView'
 import { useOpshubStore } from '@/lib/store/opshub-store'
 import { useAuthStore } from '@/lib/store/auth-store'
 import { useTfoStore } from '@/lib/store/tfo-store'
+import type { PlatformMode } from '@/lib/content/platform-content'
 import { useScreenContext } from '@/lib/store/screen-context-store'
 import { useConnectorPreference } from '@/lib/hooks/useConnectorPreference'
+import { usePlatformMode } from '@/lib/hooks/usePlatformMode'
 import type { OverlayMode } from '@/lib/types/optimization'
 import type { TfoModule } from '@/lib/types/tfo'
 import { Minimize2 } from 'lucide-react'
@@ -74,14 +76,26 @@ export default function TFODashboard() {
 
 function Dashboard() {
     useConnectorPreference()
+    usePlatformMode()
 
     const { activeModule, setActiveModule, facilityMetrics, activeAlerts, recentWorkflows, locations, activeLocationId, setActiveLocation } =
         useTfoStore()
+    const setPlatformMode = useAuthStore((s) => s.setPlatformMode)
 
     const setPendingCreateWorkOrder = useOpshubStore(s => s.setPendingCreateWorkOrder)
     const activeLocation = locations.find((l) => l.id === activeLocationId) ?? locations[0]
     const setSelectedWorkOrderId = useOpshubStore(s => s.setSelectedWorkOrderId)
     const screenCtx = useScreenContext()
+
+    // Wrapper: change location AND derive platformMode from the location's mode field
+    const handleLocationChange = useCallback(
+        (id: string) => {
+            setActiveLocation(id)
+            const loc = locations.find((l) => l.id === id)
+            if (loc) setPlatformMode(loc.mode as PlatformMode)
+        },
+        [setActiveLocation, setPlatformMode, locations]
+    )
 
     const handleModuleChange = useCallback(
         (mod: TfoModule) => {
@@ -162,7 +176,7 @@ function Dashboard() {
                 onModuleChange={handleModuleChange}
                 locations={locations}
                 activeLocation={activeLocation}
-                onLocationChange={setActiveLocation}
+                onLocationChange={handleLocationChange}
                 focusedAsset={viewMode === 'details' ? selectedAsset : null}
             />
 
