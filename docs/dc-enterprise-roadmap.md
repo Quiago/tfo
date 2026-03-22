@@ -117,8 +117,20 @@ Webhook (BMS/DCIM)         Suppression logic            → Escalation chain
   - [x] `PATCH /dispatcher/rules/{id}` → 200 actualizado
   - [x] `DELETE /dispatcher/rules/{id}` → 204
   - [x] `GET /dispatcher/events` y `GET /dispatcher/executions` → listas vacías
-- [ ] `frontend/__tests__/dispatcher/RuleBuilder.test.tsx` — *pendiente: Jest no configurado*
-- [ ] `frontend/__tests__/dispatcher/EventFeed.test.tsx` — *pendiente: Jest no configurado*
+- [x] `frontend/__tests__/dispatcher/RuleBuilder.test.tsx` — 11 tests
+  - [x] Render form vacío con heading "New Dispatch Rule"
+  - [x] Pre-fill form cuando editingRule existe (nombre, prioridad, botón Update)
+  - [x] Validación: error si nombre vacío al submit
+  - [x] Validación: error si no hay acciones al submit
+  - [x] Cancel llama onClose
+  - [x] Submit válido llama createRule y onClose
+- [x] `frontend/__tests__/dispatcher/EventFeed.test.tsx` — 12 tests
+  - [x] Muestra "Not authenticated" sin token
+  - [x] Muestra "No events yet" con lista vacía
+  - [x] Renderiza título, severity badge, status badge
+  - [x] Renderiza múltiples eventos
+  - [x] `emergency` tiene clase `animate-pulse`, `info` no
+  - [x] Muestra "manual" cuando source_connector_id es null
 
 ### Demo sin DC
 Usar `AlarmSimulator` (visible en demo mode) para generar eventos: CRAC failure / UPS degradation / PDU overload / High temp. El `POST /dispatcher/events` está abierto para ingesta manual también desde curl o Postman.
