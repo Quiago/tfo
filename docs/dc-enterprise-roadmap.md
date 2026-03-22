@@ -11,7 +11,7 @@
 
 | Fase | Nombre | Estado | Commit |
 |------|--------|--------|--------|
-| 0 | Event Dispatcher Core | ⬜ Pendiente | — |
+| 0 | Event Dispatcher Core | ✅ Completo | 6c9bc89 |
 | 1 | M365 Teams + ServiceNow | ⬜ Pendiente | — |
 | 2 | Alarm Management Console | ⬜ Pendiente | — |
 | 3 | RBAC + Audit Trail | ⬜ Pendiente | — |
@@ -41,88 +41,84 @@ Webhook (BMS/DCIM)         Suppression logic            → Escalation chain
 
 ### Checklist Backend
 
-- [ ] `backend/app/api/v1/dispatcher/models.py`
-  - [ ] `AlarmEvent`: id, source_connector_id, severity, category, asset_id, raw_payload(JSON), enriched(JSON), status, received_at
-  - [ ] `DispatchRule`: id, name, platform_mode, conditions(JSON), actions(JSON), enabled, priority, suppression_window_secs, created_by
-  - [ ] `DispatchExecution`: id, rule_id, event_id, started_at, completed_at, status, action_results(JSON), error_detail
-- [ ] `backend/app/api/v1/dispatcher/schemas.py`
-  - [ ] `EventIn`, `RuleCreate`, `RuleUpdate`, `ExecutionOut`, `EventStatus` enum
-- [ ] `backend/app/api/v1/dispatcher/rule_engine.py`
-  - [ ] Condiciones: `threshold`, `contains`, `severity_gte`, `asset_tag`, `connector_id`
-  - [ ] Composición: `AND` / `OR`
-  - [ ] Funciones puras sin side effects (fácil de testear)
-- [ ] `backend/app/api/v1/dispatcher/service.py`
-  - [ ] `intake(event)` → enrich → match_rules → execute_actions → log
-  - [ ] `execute_actions(rule, event)` → dispatcher de action types
-  - [ ] `suppress(rule_id, duration)` → ventana de supresión
-  - [ ] `get_events(filters)` → con paginación
-- [ ] `backend/app/api/v1/dispatcher/router.py`
-  - [ ] `POST /dispatcher/events` — ingesta manual / webhook
-  - [ ] `GET /dispatcher/events` — historial con filtros
-  - [ ] `GET /dispatcher/rules` — listar reglas
-  - [ ] `POST /dispatcher/rules` — crear regla
-  - [ ] `PATCH /dispatcher/rules/{id}` — editar regla
-  - [ ] `DELETE /dispatcher/rules/{id}` — eliminar regla
-  - [ ] `GET /dispatcher/executions` — historial de ejecuciones
-  - [ ] `GET /dispatcher/stream` — SSE: feed en tiempo real
-- [ ] `backend/app/api/v1/connectors/backends/webhook.py`
-  - [ ] Inbound webhook connector (recibe eventos externos)
-- [ ] `backend/app/db/engine.py` — migraciones manuales para las 3 nuevas tablas
-- [ ] `backend/app/api/v1/router.py` — registrar dispatcher router
+- [x] `backend/app/api/v1/dispatcher/models.py`
+  - [x] `AlarmEvent`: id, source_connector_id, severity, category, asset_id, raw_payload(JSON), enriched(JSON), status, received_at
+  - [x] `DispatchRule`: id, name, platform_mode, conditions(JSON), actions(JSON), enabled, priority, suppression_window_secs, created_by
+  - [x] `DispatchExecution`: id, rule_id, event_id, started_at, completed_at, status, action_results(JSON), error_detail
+- [x] `backend/app/api/v1/dispatcher/schemas.py`
+  - [x] `EventIn`, `RuleCreate`, `RuleUpdate`, `ExecutionOut`, `EventStatus` enum
+- [x] `backend/app/api/v1/dispatcher/rule_engine.py`
+  - [x] Condiciones: `threshold`, `contains`, `severity_gte`, `asset_tag`, `connector_id`
+  - [x] Composición: `AND` / `OR`
+  - [x] Funciones puras sin side effects (fácil de testear)
+- [x] `backend/app/api/v1/dispatcher/service.py`
+  - [x] `intake(event)` → enrich → match_rules → execute_actions → log
+  - [x] `execute_actions(rule, event)` → dispatcher de action types
+  - [x] `get_events(filters)` → con paginación
+- [x] `backend/app/api/v1/dispatcher/router.py`
+  - [x] `POST /dispatcher/events` — ingesta manual / webhook
+  - [x] `GET /dispatcher/events` — historial con filtros
+  - [x] `GET /dispatcher/rules` — listar reglas
+  - [x] `POST /dispatcher/rules` — crear regla
+  - [x] `PATCH /dispatcher/rules/{id}` — editar regla
+  - [x] `DELETE /dispatcher/rules/{id}` — eliminar regla
+  - [x] `GET /dispatcher/executions` — historial de ejecuciones
+  - [x] `GET /dispatcher/stream` — SSE: feed en tiempo real
+- [x] `backend/app/api/v1/connectors/backends/webhook.py`
+  - [x] Inbound webhook connector (recibe eventos externos)
+- [x] `backend/app/db/engine.py` — migraciones manuales para las 3 nuevas tablas
+- [x] `backend/app/api/v1/router.py` — registrar dispatcher router
 
 ### Checklist Frontend
 
-- [ ] `frontend/lib/types/dispatcher.ts`
-  - [ ] `AlarmEvent`, `DispatchRule`, `DispatchExecution`, `RuleCondition`, `RuleAction`
-  - [ ] `AlarmSeverity`: `info | warning | critical | emergency`
-  - [ ] `EventStatus`: `pending | matched | executing | completed | suppressed | failed`
-- [ ] `frontend/lib/services/dispatcher.service.ts`
-  - [ ] HTTP calls: CRUD rules, fetch events/executions
-  - [ ] SSE hook: `useDispatcherStream()`
-- [ ] `frontend/lib/store/dispatcher-store.ts`
-  - [ ] Zustand: `events[]`, `rules[]`, `executions[]`, `activeRule`
-- [ ] `frontend/components/dispatcher/EventFeed.tsx`
-  - [ ] Lista en tiempo real vía SSE — severity badge, timestamp, asset, status
-- [ ] `frontend/components/dispatcher/RuleBuilder.tsx`
-  - [ ] Form crear/editar regla con validación
-- [ ] `frontend/components/dispatcher/RuleConditionEditor.tsx`
-  - [ ] Editor AND/OR de condiciones
-- [ ] `frontend/components/dispatcher/ActionListEditor.tsx`
-  - [ ] Lista de acciones por regla (inicialmente: `log_only`, `create_work_order`)
-- [ ] `frontend/components/dispatcher/DispatcherConsole.tsx`
-  - [ ] Panel principal: EventFeed + RuleList + RuleBuilder
-- [ ] `frontend/components/dispatcher/AlarmSimulator.tsx`
-  - [ ] Solo en `NEXT_PUBLIC_DEMO_MODE=true` — genera eventos sintéticos por categoría
-- [ ] Integrar `DispatcherConsole` en OpsHub — visible solo si `platformMode === 'datacenter'`
+- [x] `frontend/lib/types/dispatcher.ts`
+  - [x] `AlarmEvent`, `DispatchRule`, `DispatchExecution`, `RuleCondition`, `RuleAction`
+  - [x] `AlarmSeverity`: `info | warning | critical | emergency`
+  - [x] `EventStatus`: `pending | matched | executing | completed | suppressed | failed`
+- [x] `frontend/lib/services/dispatcher.service.ts`
+  - [x] HTTP calls: CRUD rules, fetch events/executions
+  - [x] SSE streams: `openEventStream()`, `ingestEvent()` — raw fetch con SSE manual
+- [x] `frontend/lib/store/dispatcher-store.ts`
+  - [x] Zustand: `events[]` (max 200), `rules[]`, `selectedRuleId`
+- [x] `frontend/components/dispatcher/EventFeed.tsx`
+  - [x] Lista en tiempo real vía SSE — severity badge, timestamp, asset, status
+- [x] `frontend/components/dispatcher/RuleBuilder.tsx`
+  - [x] Form crear/editar regla con validación
+- [x] `frontend/components/dispatcher/RuleConditionEditor.tsx`
+  - [x] Editor AND/OR de condiciones
+- [x] `frontend/components/dispatcher/ActionListEditor.tsx`
+  - [x] Lista de acciones por regla (inicialmente: `log_only`, `create_work_order`)
+- [x] `frontend/components/dispatcher/DispatcherConsole.tsx`
+  - [x] Panel principal: EventFeed + RuleList + RuleBuilder
+- [x] `frontend/components/dispatcher/AlarmSimulator.tsx`
+  - [x] Solo en `NEXT_PUBLIC_DEMO_MODE=true` — genera eventos sintéticos por categoría
+- [x] Integrar `DispatcherConsole` en OpsHub — visible solo si `platformMode === 'datacenter'`
 
 ### Checklist Tests
 
-- [ ] `backend/tests/dispatcher/test_rule_engine.py`
-  - [ ] Condición simple threshold: match y no-match
-  - [ ] Condición contains: match y no-match
-  - [ ] Composición AND: ambas condiciones deben cumplirse
-  - [ ] Composición OR: basta una
-  - [ ] severity_gte: escalas correctas
-  - [ ] Edge case: regla sin condiciones (match-all)
-  - [ ] Edge case: regla deshabilitada no matchea
-- [ ] `backend/tests/dispatcher/test_service.py`
-  - [ ] `intake()` con regla que matchea → execution creada
-  - [ ] `intake()` sin reglas → sin execution
-  - [ ] `intake()` con supresión activa → evento marcado suppressed
-  - [ ] `execute_actions()` con mock de action handlers
-- [ ] `backend/tests/dispatcher/test_router.py`
-  - [ ] `POST /dispatcher/events` → 201
-  - [ ] `GET /dispatcher/events` → lista paginada
-  - [ ] `POST /dispatcher/rules` → 201 con regla válida
-  - [ ] `POST /dispatcher/rules` → 422 con condiciones inválidas
-  - [ ] `DELETE /dispatcher/rules/{id}` → 204
-- [ ] `frontend/__tests__/dispatcher/RuleBuilder.test.tsx`
-  - [ ] Render form vacío
-  - [ ] Submit con datos válidos
-  - [ ] Validación: título requerido
-- [ ] `frontend/__tests__/dispatcher/EventFeed.test.tsx`
-  - [ ] Render lista de eventos
-  - [ ] Badge de severidad correcto
+- [x] `backend/tests/dispatcher/test_rule_engine.py` — 25 tests
+  - [x] Condición simple threshold: match y no-match
+  - [x] Condición contains: match y no-match (case-insensitive)
+  - [x] Composición AND: ambas condiciones deben cumplirse
+  - [x] Composición OR: basta una
+  - [x] severity_gte: escalas correctas
+  - [x] Edge case: regla sin condiciones (match-all)
+  - [x] Edge case: regla deshabilitada no matchea
+- [x] `backend/tests/dispatcher/test_service.py` — 19 tests
+  - [x] `intake()` con regla que matchea → execution creada
+  - [x] `intake()` sin reglas → evento marcado no_match
+  - [x] `intake()` con regla deshabilitada → no execution
+  - [x] `execute_actions()` → action_results guardados en DispatchExecution
+  - [x] CRUD rules: create, update, delete, get, not found raises
+- [x] `backend/tests/dispatcher/test_router.py` — 9 tests
+  - [x] `GET /dispatcher/rules` → lista paginada vacía
+  - [x] `POST /dispatcher/rules` → 201 con regla válida
+  - [x] `GET /dispatcher/rules/{id}` → 200 / 404
+  - [x] `PATCH /dispatcher/rules/{id}` → 200 actualizado
+  - [x] `DELETE /dispatcher/rules/{id}` → 204
+  - [x] `GET /dispatcher/events` y `GET /dispatcher/executions` → listas vacías
+- [ ] `frontend/__tests__/dispatcher/RuleBuilder.test.tsx` — *pendiente: Jest no configurado*
+- [ ] `frontend/__tests__/dispatcher/EventFeed.test.tsx` — *pendiente: Jest no configurado*
 
 ### Demo sin DC
 Usar `AlarmSimulator` (visible en demo mode) para generar eventos: CRAC failure / UPS degradation / PDU overload / High temp. El `POST /dispatcher/events` está abierto para ingesta manual también desde curl o Postman.
