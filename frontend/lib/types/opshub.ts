@@ -127,7 +127,7 @@ export type TaskStatus = 'pending' | 'in-progress' | 'completed' | 'blocked' | '
 export type TaskPriority = 'low' | 'medium' | 'high' | 'critical'
 
 // ─── Tabs ───────────────────────────────────────────────────────
-export type OpshubTab = 'home' | 'my-tasks' | 'work-orders'
+export type OpshubTab = 'home' | 'my-tasks' | 'work-orders' | 'dispatcher'
 export type OpshubViewMode = 'executive' | 'engineering' | 'operations'
 export type WorkOrderInnerTab = 'overview' | 'tasks' | 'workflows' | 'discussion' | 'activity'
 

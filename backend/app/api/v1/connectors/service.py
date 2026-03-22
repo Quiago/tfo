@@ -18,6 +18,7 @@ from app.api.v1.connectors.backends.mcp import MCPConnector
 from app.api.v1.connectors.backends.mqtt import MQTTConnector
 from app.api.v1.connectors.backends.opcua import OPCUAConnector
 from app.api.v1.connectors.backends.rest import RESTConnector
+from app.api.v1.connectors.backends.webhook import WebhookConnector
 from app.api.v1.connectors.exceptions import (
     BackendNotImplemented, ConnectorAlreadyExists, ConnectorInactive,
     ConnectorNotFound, ConnectorReadError, ConnectorUnreachable, ConnectorWriteError,
@@ -32,6 +33,7 @@ _REGISTRY: dict[ConnectorType, type[ConnectorBackend]] = {
     ConnectorType.mqtt: MQTTConnector,
     ConnectorType.rest: RESTConnector,
     ConnectorType.mcp: MCPConnector,
+    ConnectorType.webhook: WebhookConnector,
 }
 
 _DISCOVERY_TTL_SECONDS = 300

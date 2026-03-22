@@ -17,6 +17,7 @@ class ConnectorType(StrEnum):
     mqtt = "mqtt"
     rest = "rest"
     mcp = "mcp"
+    webhook = "webhook"
 
 
 class Connector(SQLModel, table=True):
