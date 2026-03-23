@@ -115,10 +115,11 @@ export function OpshubLayout() {
                     isDatacenter={isDatacenter}
                 />
             )}
-            <WorkOrderList
-                onSelectWorkOrder={setSelectedWorkOrderId}
-            // No onBack prop since this is now the root view
-            />
+            <div className="flex-1 min-h-0 overflow-hidden">
+                <WorkOrderList
+                    onSelectWorkOrder={setSelectedWorkOrderId}
+                />
+            </div>
         </div>
     )
 }
