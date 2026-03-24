@@ -53,6 +53,7 @@ class ModelConfig:
     context_length: int
     memory_required_gb: float         # RAM en CPU float32 / VRAM en GPU float16
     supports_tools: bool = False
+    supports_thinking: bool = False   # True if model has a <think> reasoning mode (Qwen3, R1…)
     dtype: str = "float32"
     quantization: str | None = None   # "awq" | "gptq" | None (solo GPU + vLLM)
 
@@ -97,6 +98,7 @@ CATALOG: dict[str, ModelConfig] = {
         context_length=32000,
         memory_required_gb=10.0,
         supports_tools=True,
+        supports_thinking=True,
         dtype="float16",
         quantization="awq",
     ),
@@ -245,6 +247,7 @@ def get_catalog() -> CatalogResponse:
             context_length=config.context_length,
             memory_required_gb=config.memory_required_gb,
             supports_tools=config.supports_tools,
+            supports_thinking=config.supports_thinking,
             quantization=config.quantization,
             is_loaded=(config.id == engine.current_model_id),
         )

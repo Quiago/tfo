@@ -9,6 +9,7 @@ class ModelInfo(BaseModel):
     context_length: int
     memory_required_gb: float
     supports_tools: bool
+    supports_thinking: bool = False
     quantization: str | None = None
     is_loaded: bool
 

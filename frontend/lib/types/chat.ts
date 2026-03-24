@@ -67,6 +67,7 @@ export interface ModelInfo {
     context_length: number
     memory_required_gb: number
     supports_tools: boolean
+    supports_thinking: boolean
     quantization: string | null
     is_loaded: boolean
 }

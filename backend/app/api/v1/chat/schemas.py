@@ -49,6 +49,7 @@ class MessageCreate(BaseModel):
     stream: bool = False
     max_new_tokens: int = 2048
     temperature: float = 0.7
+    enable_thinking: bool = False
     screen_context: ScreenContextSnapshot | None = None
 
 

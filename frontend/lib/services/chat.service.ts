@@ -35,7 +35,7 @@ export async function getMessages(conversationId: string): Promise<ChatMessage[]
 export async function* streamMessage(
     conversationId: string,
     content: string,
-    options: { max_new_tokens?: number; temperature?: number; screen_context?: AgentScreenContext } = {},
+    options: { max_new_tokens?: number; temperature?: number; enable_thinking?: boolean; screen_context?: AgentScreenContext } = {},
     signal?: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
     const token = getStoredToken();

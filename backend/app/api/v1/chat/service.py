@@ -234,7 +234,7 @@ def list_messages(conversation_id: str, user_id: int, session: Session) -> list[
     )
 
 
-async def send_message(conversation_id: str, user_id: int, content: str, max_new_tokens: int, temperature: float, session: Session, screen_context=None) -> Message:
+async def send_message(conversation_id: str, user_id: int, content: str, max_new_tokens: int, temperature: float, session: Session, screen_context=None, enable_thinking: bool = False) -> Message:
     if not engine.is_ready:
         raise ModelNotReady
 
@@ -249,7 +249,7 @@ async def send_message(conversation_id: str, user_id: int, content: str, max_new
     model_config = get_model_config(conv.model_id)
     context = build_context(conv, messages, memories, model_config=model_config, kb_documents=kb_docs, screen_context=screen_context)
 
-    final_text, tool_calls_log = await _run_tool_loop(context, max_new_tokens, temperature, session, model_config)
+    final_text, tool_calls_log = await _run_tool_loop(context, max_new_tokens, temperature, session, model_config, enable_thinking=enable_thinking)
     final_text, _ = _extract_thinking(final_text)  # strip think block before saving
 
     assistant_msg = _save_message(conv.id, "assistant", final_text, session, tool_calls=tool_calls_log or None)
@@ -257,7 +257,7 @@ async def send_message(conversation_id: str, user_id: int, content: str, max_new
     return assistant_msg
 
 
-async def send_message_streaming(conversation_id: str, user_id: int, content: str, max_new_tokens: int, temperature: float, session: Session, screen_context=None) -> AsyncGenerator[dict, None]:
+async def send_message_streaming(conversation_id: str, user_id: int, content: str, max_new_tokens: int, temperature: float, session: Session, screen_context=None, enable_thinking: bool = False) -> AsyncGenerator[dict, None]:
     logger.info(
         "stream_start — conv=%s user=%s model_ready=%s model=%s",
         conversation_id, user_id, engine.is_ready, engine.current_model_id,
@@ -296,7 +296,7 @@ async def send_message_streaming(conversation_id: str, user_id: int, content: st
         tool_response_text = ""
 
         try:
-            async for event in _stream_llm_response(context, max_new_tokens, temperature, tools):
+            async for event in _stream_llm_response(context, max_new_tokens, temperature, tools, enable_thinking=enable_thinking):
                 if event["type"] == "_tool_detected":
                     tool_detected = True
                     tool_response_text = event["text"]
@@ -403,13 +403,13 @@ def delete_memory(memory_id: int, user_id: int, session: Session) -> None:
     session.commit()
 
 
-async def _run_tool_loop(context: list[dict], max_new_tokens: int, temperature: float, session: Session, model_config: ModelConfig) -> tuple[str, list[dict]]:
+async def _run_tool_loop(context: list[dict], max_new_tokens: int, temperature: float, session: Session, model_config: ModelConfig, enable_thinking: bool = False) -> tuple[str, list[dict]]:
     tool_calls_log: list[dict] = []
     tools = OPENAI_TOOL_SCHEMAS if model_config.supports_native_tools else None
     response = ""
 
     for iteration in range(_MAX_TOOL_ITERATIONS):
-        response = await engine.generate(context, max_new_tokens, temperature, tools=tools)
+        response = await engine.generate(context, max_new_tokens, temperature, tools=tools, enable_thinking=enable_thinking)
         tool_name, tool_args = parse_tool_call(response)
 
         if not tool_name:

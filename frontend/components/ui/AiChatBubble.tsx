@@ -269,6 +269,7 @@ export function AiChatBubble() {
     const [modelDropdown, setModelDropdown] = useState(false)
     const [loadingModel, setLoadingModel] = useState(false)
     const [currentModelId, setCurrentModelId] = useState<string | null>(null)
+    const [thinkingEnabled, setThinkingEnabled] = useState(false)
 
     // Documents
     const [documents, setDocuments] = useState<KBDocument[]>([])
@@ -431,7 +432,7 @@ export function AiChatBubble() {
             // ── Unified chat stream (screen context always included) ───────────
             let finalMessageId: string | null = null
 
-            for await (const event of streamMessage(convId, content, { screen_context: serialiseScreenContext(screenCtx) }, abort.signal)) {
+            for await (const event of streamMessage(convId, content, { enable_thinking: thinkingEnabled, screen_context: serialiseScreenContext(screenCtx) }, abort.signal)) {
                 if (abort.signal.aborted) break
 
                 switch (event.type) {
@@ -545,7 +546,7 @@ export function AiChatBubble() {
             setStreaming(false)
             abortRef.current = null
         }
-    }, [input, streaming, activeConvId, currentModelId, catalog?.default_model, screenCtx, handleModelNotReady])
+    }, [input, streaming, activeConvId, currentModelId, catalog?.default_model, screenCtx, thinkingEnabled, handleModelNotReady])
 
     // ── Auto-retry: poll catalog until model ready, then resend ───────────────
     useEffect(() => {
@@ -620,6 +621,9 @@ export function AiChatBubble() {
             setNoModelLoaded(false)
             const cat = await getModelCatalog()
             setCatalog(cat)
+            // Disable thinking if the new model doesn't support it
+            const newModel = cat.models.find(m => m.id === modelId)
+            if (!newModel?.supports_thinking) setThinkingEnabled(false)
         } catch (e) {
             console.error('[Chat] load model failed:', e)
         } finally {
@@ -1146,8 +1150,23 @@ export function AiChatBubble() {
                                         </button>
                                     </div>
 
-                                    {/* Right: model selector + send */}
+                                    {/* Right: thinking toggle (if model supports it) · model selector · send */}
                                     <div className="flex items-center gap-1.5">
+                                        {/* Thinking toggle — only for models that support it */}
+                                        {currentModel?.supports_thinking && (
+                                            <button
+                                                onClick={() => setThinkingEnabled(v => !v)}
+                                                title={thinkingEnabled ? 'Thinking ON — click to disable' : 'Thinking OFF — click to enable deep reasoning'}
+                                                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium transition-colors ${thinkingEnabled
+                                                    ? 'bg-violet-100 text-violet-600 hover:bg-violet-200'
+                                                    : 'text-zinc-400 hover:bg-white hover:text-zinc-600'
+                                                }`}
+                                            >
+                                                <Brain size={10} className="flex-shrink-0" />
+                                                <span>{thinkingEnabled ? 'Think' : 'Think'}</span>
+                                            </button>
+                                        )}
+
                                         {/* Model picker — Notion "Auto" style */}
                                         <div className="relative" onClick={e => e.stopPropagation()}>
                                             <button

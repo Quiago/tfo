@@ -76,6 +76,7 @@ async def send_message(conversation_id: str, body: MessageCreate, session: Sessi
             content=body.content,
             max_new_tokens=body.max_new_tokens,
             temperature=body.temperature,
+            enable_thinking=body.enable_thinking,
             session=session,
             screen_context=body.screen_context,
         )
@@ -90,6 +91,7 @@ async def send_message(conversation_id: str, body: MessageCreate, session: Sessi
         content=body.content,
         max_new_tokens=body.max_new_tokens,
         temperature=body.temperature,
+        enable_thinking=body.enable_thinking,
         session=session,
         screen_context=body.screen_context,
     )
