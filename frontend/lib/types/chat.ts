@@ -46,7 +46,7 @@ export interface LocalMessage {
 // ─── SSE EVENTS ───────────────────────────────────────────────────────────────
 
 export interface StreamEvent {
-    type: 'token' | 'tool_call' | 'tool_result' | 'thinking' | 'done' | 'error' | 'ui_action'
+    type: 'token' | 'tool_call' | 'tool_result' | 'thinking' | 'thinking_delta' | 'done' | 'error' | 'ui_action'
     content?: string
     name?: string
     arguments?: Record<string, unknown>

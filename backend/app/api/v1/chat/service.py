@@ -67,27 +67,30 @@ async def _stream_llm_response(
     max_new_tokens: int,
     temperature: float,
     tools: list | None,
+    enable_thinking: bool = False,
 ) -> AsyncGenerator[dict, None]:
     """
     Real-streaming wrapper over engine.generate_stream().
 
     Handles two special cases transparently:
-      • <think>…</think>  → buffers block, emits {"type": "thinking", "content": "…"}
-                            then continues streaming the answer normally.
+      • <think>…</think>  → emits {"type": "thinking_delta"} in real-time as tokens arrive,
+                            then {"type": "thinking", "content": full_block} when </think> is seen.
+                            This way the frontend shows live thinking progress immediately.
       • <tool_call>…      → detected in the lookahead buffer; emits a single internal
                             {"type": "_tool_detected", "text": full_response} event so
                             the caller can run the tool without the user seeing raw JSON.
 
     Normal text is emitted as {"type": "token", "content": delta}.
 
-    The caller owns the final assembly (persisting to DB, etc.).
+    enable_thinking=False (default): disables Qwen3 thinking mode. First token arrives
+    in ~0.3-0.8s (prefill time only). Set True for complex analytical tasks.
     """
     # State: "lookahead" | "thinking" | "streaming" | "tool_call"
     state = "lookahead"
     buf = ""        # always accumulates the full raw output
     think_buf = ""  # content inside <think>…</think>
 
-    async for delta in engine.generate_stream(context, max_new_tokens, temperature, tools):
+    async for delta in engine.generate_stream(context, max_new_tokens, temperature, tools, enable_thinking):
         buf += delta
 
         if state == "lookahead":
@@ -101,6 +104,9 @@ async def _stream_llm_response(
             if stripped.startswith("<think>"):
                 state = "thinking"
                 think_buf = buf[buf.index("<think>") + 7:]
+                # Emit thinking deltas accumulated so far (real-time UX)
+                if think_buf:
+                    yield {"type": "thinking_delta", "content": think_buf}
                 continue
 
             # Keep buffering until we have enough chars to be confident
@@ -113,8 +119,11 @@ async def _stream_llm_response(
 
         elif state == "thinking":
             think_buf += delta
+            # Emit delta in real-time — user sees thinking progress live
+            yield {"type": "thinking_delta", "content": delta}
             if "</think>" in think_buf:
                 end_idx = think_buf.index("</think>")
+                # Emit the complete thinking block for collapsible display
                 yield {"type": "thinking", "content": think_buf[:end_idx].strip()}
                 after = think_buf[end_idx + 8:].lstrip()
                 state = "streaming"
@@ -291,8 +300,10 @@ async def send_message_streaming(conversation_id: str, user_id: int, content: st
                 if event["type"] == "_tool_detected":
                     tool_detected = True
                     tool_response_text = event["text"]
+                elif event["type"] == "thinking_delta":
+                    yield event  # real-time thinking progress → forward immediately
                 elif event["type"] == "thinking":
-                    yield event  # forward thinking block to frontend
+                    yield event  # complete thinking block for collapsible display
                 elif event["type"] == "token":
                     streamed_parts.append(event["content"])
                     yield event  # real vLLM token → forward immediately

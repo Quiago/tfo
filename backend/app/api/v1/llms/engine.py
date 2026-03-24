@@ -154,23 +154,24 @@ class VLLMEngine:
         self._current_model_id = model_id
         logger.info(f"[Engine] Listo (transformers): {model_id}")
 
-    async def generate(self, messages: list[dict], max_new_tokens: int = 512, temperature: float = 0.7, tools: list | None = None) -> str:
+    async def generate(self, messages: list[dict], max_new_tokens: int = 512, temperature: float = 0.7, tools: list | None = None, enable_thinking: bool = False) -> str:
         """
         Genera texto dado un historial en formato OpenAI messages.
         Bloquea hasta que la generación completa. Úsalo cuando necesitas el texto
         completo antes de proceder (p.ej. detección de tool calls en el loop del agente).
         tools: schemas en formato OpenAI. Se pasa a apply_chat_template si el modelo lo soporta.
+        enable_thinking: activa el modo thinking de Qwen3 (default False — mucho más rápido).
         """
         logger.debug(
-            "[Engine] generate() — is_ready=%s backend=%s model=%s msgs=%d tools=%s",
+            "[Engine] generate() — is_ready=%s backend=%s model=%s msgs=%d tools=%s thinking=%s",
             self.is_ready, self.backend, self._current_model_id, len(messages),
-            len(tools) if tools else 0,
+            len(tools) if tools else 0, enable_thinking,
         )
         if not self.is_ready:
             raise RuntimeError("No hay modelo cargado. Llama load() primero.")
         if _VLLM_AVAILABLE and self._vllm_engine:
-            return await self._generate_vllm(messages, max_new_tokens, temperature, tools)
-        return await self._generate_transformers(messages, max_new_tokens, temperature, tools)
+            return await self._generate_vllm(messages, max_new_tokens, temperature, tools, enable_thinking)
+        return await self._generate_transformers(messages, max_new_tokens, temperature, tools, enable_thinking)
 
     async def generate_stream(
         self,
@@ -178,6 +179,7 @@ class VLLMEngine:
         max_new_tokens: int = 512,
         temperature: float = 0.7,
         tools: list | None = None,
+        enable_thinking: bool = False,
     ) -> AsyncGenerator[str, None]:
         """
         Generador asíncrono que produce deltas de texto conforme el modelo genera.
@@ -193,19 +195,19 @@ class VLLMEngine:
         if not self.is_ready:
             raise RuntimeError("No hay modelo cargado. Llama load() primero.")
         if _VLLM_AVAILABLE and self._vllm_engine:
-            async for delta in self._generate_vllm_stream(messages, max_new_tokens, temperature, tools):
+            async for delta in self._generate_vllm_stream(messages, max_new_tokens, temperature, tools, enable_thinking):
                 yield delta
         else:
             # CPU: no hay streaming nativo en transformers — emitimos todo de golpe
-            full = await self._generate_transformers(messages, max_new_tokens, temperature, tools)
+            full = await self._generate_transformers(messages, max_new_tokens, temperature, tools, enable_thinking)
             yield full
 
-    async def _generate_vllm(self, messages: list[dict], max_new_tokens: int, temperature: float, tools: list | None) -> str:
+    async def _generate_vllm(self, messages: list[dict], max_new_tokens: int, temperature: float, tools: list | None, enable_thinking: bool = False) -> str:
         """Generación bloqueante con vLLM (espera toda la salida)."""
         from vllm import SamplingParams
 
         tokenizer = await asyncio.to_thread(self._vllm_engine.get_tokenizer)
-        prompt = self._apply_template(tokenizer, messages, tools)
+        prompt = self._apply_template(tokenizer, messages, tools, enable_thinking)
         params = SamplingParams(max_tokens=max_new_tokens, temperature=temperature)
         outputs = []
         async for output in self._vllm_engine.generate(prompt, params, request_id=str(uuid.uuid4())):
@@ -218,6 +220,7 @@ class VLLMEngine:
         max_new_tokens: int,
         temperature: float,
         tools: list | None,
+        enable_thinking: bool = False,
     ) -> AsyncGenerator[str, None]:
         """
         Streaming real de tokens desde vLLM.
@@ -226,7 +229,7 @@ class VLLMEngine:
         from vllm import SamplingParams
 
         tokenizer = await asyncio.to_thread(self._vllm_engine.get_tokenizer)
-        prompt = self._apply_template(tokenizer, messages, tools)
+        prompt = self._apply_template(tokenizer, messages, tools, enable_thinking)
         params = SamplingParams(max_tokens=max_new_tokens, temperature=temperature)
 
         prev_len = 0
@@ -237,10 +240,10 @@ class VLLMEngine:
             if delta:
                 yield delta
 
-    async def _generate_transformers(self, messages: list[dict], max_new_tokens: int, temperature: float, tools: list | None) -> str:
+    async def _generate_transformers(self, messages: list[dict], max_new_tokens: int, temperature: float, tools: list | None, enable_thinking: bool = False) -> str:
         """Generación con transformers (CPU). Bloqueante → wrapeado en to_thread."""
         tokenizer = self._pipeline.tokenizer
-        prompt = self._apply_template(tokenizer, messages, tools)
+        prompt = self._apply_template(tokenizer, messages, tools, enable_thinking)
 
         def _run():
             outputs = self._pipeline(
@@ -255,26 +258,45 @@ class VLLMEngine:
         return await asyncio.to_thread(_run)
 
     @staticmethod
-    def _apply_template(tokenizer, messages: list[dict], tools: list | None) -> str:
+    def _apply_template(tokenizer, messages: list[dict], tools: list | None, enable_thinking: bool = False) -> str:
         """
-        Aplica el chat template. Intenta inyectar tools= nativamente; si el
-        tokenizer no lo soporta, cae al template sin tools (los schemas ya están
-        en el system prompt como texto via context.py, así que el modelo los ve).
+        Aplica el chat template. Intenta inyectar enable_thinking=False para desactivar
+        el modo thinking de Qwen3 (evita generar cientos de tokens de <think> innecesarios).
+        Si el tokenizador no soporta enable_thinking, cae a la llamada estándar.
+        Intenta inyectar tools= nativamente; si no lo soporta, usa el text del system prompt.
         """
+        base_kwargs: dict = {"tokenize": False, "add_generation_prompt": True}
+        # Qwen3 / thinking-capable models: pass enable_thinking explicitly.
+        # Other tokenizers raise TypeError on unknown kwargs → we catch and retry without it.
+        thinking_kwargs = {"enable_thinking": enable_thinking}
+
         if tools:
             try:
                 prompt = tokenizer.apply_chat_template(
-                    messages, tools=tools, tokenize=False, add_generation_prompt=True
+                    messages, tools=tools, **thinking_kwargs, **base_kwargs,
                 )
-                logger.debug("[Engine] Chat template aplicado con tools nativos (%d schemas).", len(tools))
+                logger.debug(
+                    "[Engine] Chat template con tools nativos (%d schemas) thinking=%s.",
+                    len(tools), enable_thinking,
+                )
                 return prompt
+            except TypeError:
+                # Tokenizer doesn't support enable_thinking — retry without it
+                try:
+                    prompt = tokenizer.apply_chat_template(messages, tools=tools, **base_kwargs)
+                    logger.debug("[Engine] Chat template con tools nativos (sin enable_thinking).")
+                    return prompt
+                except Exception as exc:
+                    logger.warning("[Engine] Template nativo de tools falló (%s). Usando system prompt.", exc)
             except Exception as exc:
-                logger.warning(
-                    "[Engine] Template nativo de tools falló (%s). "
-                    "El modelo usará el texto del system prompt para saber qué tools existen.",
-                    exc,
-                )
-        return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                logger.warning("[Engine] Template nativo de tools falló (%s). Usando system prompt.", exc)
+
+        try:
+            return tokenizer.apply_chat_template(messages, **thinking_kwargs, **base_kwargs)
+        except TypeError:
+            # Fallback: tokenizer doesn't support enable_thinking
+            logger.debug("[Engine] Tokenizer no soporta enable_thinking — usando template estándar.")
+            return tokenizer.apply_chat_template(messages, **base_kwargs)
 
     @property
     def current_model_id(self) -> str | None:

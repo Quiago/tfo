@@ -150,20 +150,27 @@ function ToolCallCard({ toolCall }: { toolCall: ToolCallEntry }) {
 
 // ─── THINKING BLOCK ───────────────────────────────────────────────────────────
 
-function ThinkingBlock({ content }: { content: string }) {
-    const [expanded, setExpanded] = useState(false)
+function ThinkingBlock({ content, streaming = false }: { content: string; streaming?: boolean }) {
+    const [expanded, setExpanded] = useState(streaming) // auto-expand while streaming
+    // Collapse when streaming finishes
+    useEffect(() => { if (!streaming) setExpanded(false) }, [streaming])
     return (
         <div className="my-1 rounded-xl border border-violet-200 bg-violet-50 text-xs overflow-hidden w-full">
             <button
                 onClick={() => setExpanded(v => !v)}
                 className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-violet-100 transition-colors"
             >
-                <Brain size={12} className="text-violet-400 flex-shrink-0" />
-                <span className="font-medium text-violet-600 flex-1">Thinking</span>
+                {streaming
+                    ? <Loader2 size={12} className="text-violet-400 flex-shrink-0 animate-spin" />
+                    : <Brain size={12} className="text-violet-400 flex-shrink-0" />
+                }
+                <span className="font-medium text-violet-600 flex-1">
+                    {streaming ? 'Thinking…' : 'Thinking'}
+                </span>
                 <ChevronDown size={12} className={`text-violet-400 transition-transform flex-shrink-0 ${expanded ? 'rotate-180' : ''}`} />
             </button>
             {expanded && (
-                <div className="px-3 pb-3 border-t border-violet-200">
+                <div className="px-3 pb-3 border-t border-violet-200 max-h-[120px] overflow-y-auto">
                     <p className="text-[11px] text-violet-600 mt-2 whitespace-pre-wrap leading-relaxed">{content}</p>
                 </div>
             )}
@@ -436,7 +443,17 @@ export function AiChatBubble() {
                         ))
                         break
 
+                    case 'thinking_delta':
+                        // Real-time thinking progress — append to live thinking content
+                        setMessages(prev => prev.map(m =>
+                            m.id === streamingIdRef.current
+                                ? { ...m, thinking: (m.thinking ?? '') + (event.content ?? '') }
+                                : m
+                        ))
+                        break
+
                     case 'thinking':
+                        // Complete thinking block arrived — replace with finalized content
                         setMessages(prev => prev.map(m =>
                             m.id === streamingIdRef.current
                                 ? { ...m, thinking: event.content ?? '' }
@@ -976,8 +993,8 @@ export function AiChatBubble() {
                                             </div>
                                         )}
 
-                                        {/* Thinking block */}
-                                        {msg.thinking && <ThinkingBlock content={msg.thinking} />}
+                                        {/* Thinking block — shows live during streaming, collapses on done */}
+                                        {msg.thinking && <ThinkingBlock content={msg.thinking} streaming={!!msg.streaming} />}
 
                                         {/* Tool calls */}
                                         {msg.tool_calls?.map((tc, i) => (
@@ -1015,7 +1032,7 @@ export function AiChatBubble() {
                                                 : 'bg-[#F2F5FF] text-[#3A3A3A] rounded-tl-sm'
                                                 }`}>
                                                 {msg.role === 'assistant' ? (
-                                                    msg.streaming && !msg.content ? (
+                                                    msg.streaming && !msg.content && !msg.thinking ? (
                                                         <span className="flex gap-1 items-center h-4">
                                                             <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce [animation-delay:0ms]" />
                                                             <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce [animation-delay:150ms]" />
@@ -1114,9 +1131,16 @@ export function AiChatBubble() {
                                             }
                                         </button>
                                         <button
-                                            onClick={() => { setSideOpen(true); setActiveTab('actions') }}
-                                            title="Actions & Integrations"
-                                            className={`w-6 h-6 flex items-center justify-center transition-colors flex-shrink-0 ${activeTab === 'actions' && sideOpen ? 'text-violet-500' : 'text-zinc-400 hover:text-violet-500'}`}
+                                            onClick={() => {
+                                                if (sideOpen && activeTab === 'actions') {
+                                                    setSideOpen(false)
+                                                } else {
+                                                    setSideOpen(true)
+                                                    setActiveTab('actions')
+                                                }
+                                            }}
+                                            title={sideOpen && activeTab === 'actions' ? 'Close Actions panel' : 'Actions & Integrations'}
+                                            className={`w-6 h-6 flex items-center justify-center transition-colors flex-shrink-0 rounded ${sideOpen && activeTab === 'actions' ? 'text-violet-500 bg-violet-50' : 'text-zinc-400 hover:text-violet-500'}`}
                                         >
                                             <PlugZap size={13} />
                                         </button>
