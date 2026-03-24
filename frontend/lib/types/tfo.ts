@@ -7,6 +7,7 @@ export type TfoModule =
     | 'workflows'
     | 'opshub'
     | 'updates'
+    | 'events'
 
 export interface TfoModuleMeta {
     id: TfoModule

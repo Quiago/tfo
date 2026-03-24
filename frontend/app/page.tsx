@@ -47,6 +47,11 @@ const OpshubLayout = dynamic(
     { ssr: false, loading: () => <ModuleLoader label="OpsHub" /> }
 )
 
+const EventManagementConsole = dynamic(
+    () => import('@/components/events/EventManagementConsole').then((m) => m.EventManagementConsole),
+    { ssr: false, loading: () => <ModuleLoader label="Events" /> }
+)
+
 function ModuleLoader({ label }: { label: string }) {
     return (
         <div className="flex h-full w-full items-center justify-center bg-zinc-950">
@@ -272,6 +277,11 @@ function Dashboard() {
                 {mounted.has('opshub') && (
                     <div className={`absolute inset-0 overflow-hidden ${activeModule === 'opshub' ? 'z-30' : 'z-0 invisible pointer-events-none'}`}>
                         <OpshubLayout />
+                    </div>
+                )}
+                {mounted.has('events') && (
+                    <div className={`absolute inset-0 overflow-hidden ${activeModule === 'events' ? 'z-30' : 'z-0 invisible pointer-events-none'}`}>
+                        <EventManagementConsole />
                     </div>
                 )}
                 {activeModule === 'updates' && (

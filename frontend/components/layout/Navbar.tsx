@@ -16,17 +16,19 @@ import {
     RefreshCw,
     Search,
     Server,
-    Workflow
+    Workflow,
+    Zap,
 } from 'lucide-react'
 import React, { useState } from 'react'
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 // Module labels are static; descriptions are content-driven (see Navbar component).
-export const MODULES: { id: TfoModule; label: string; icon: React.ReactNode }[] = [
+export const MODULES: { id: TfoModule; label: string; icon: React.ReactNode; datacenterOnly?: boolean }[] = [
     { id: 'overview',  label: 'Overview',  icon: <LayoutGrid size={16} /> },
     { id: 'timeline',  label: 'Timeline',  icon: <Activity size={16} /> },
     { id: 'workflows', label: 'Workflows', icon: <Workflow size={16} /> },
     { id: 'opshub',    label: 'OpsHub',    icon: <LayoutDashboard size={16} /> },
+    { id: 'events',    label: 'Events',    icon: <Zap size={16} />, datacenterOnly: true },
     { id: 'updates',   label: 'Updates',   icon: <RefreshCw size={16} /> },
 ]
 
@@ -129,7 +131,7 @@ export function Navbar({
 
             {/* Modules Pill */}
             <div className={nav.modulePill}>
-                {MODULES.map((mod) => (
+                {MODULES.filter(mod => !mod.datacenterOnly || platformMode === 'datacenter').map((mod) => (
                     <button
                         key={mod.id}
                         title={moduleDescriptions[mod.id as keyof typeof moduleDescriptions]}

@@ -23,6 +23,7 @@ export interface PlatformContent {
         workflows: string
         opshub: string
         updates: string
+        events?: string
     }
     /** Right panel — overview sidebar */
     rightPanel: {
@@ -74,6 +75,7 @@ export const PLATFORM_CONTENT: Record<PlatformMode, PlatformContent> = {
             workflows: 'Process automation',
             opshub: 'Cross-DC ops',
             updates: 'Latest automations',
+            events: 'Event & alarm management',
         },
         rightPanel: {
             chart1Title: 'Server Utilization (Last 7d)',

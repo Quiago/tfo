@@ -54,6 +54,7 @@ function makeEvent(overrides: Partial<AlarmEvent> = {}): AlarmEvent {
         source_connector_id: 'ups-connector',
         asset_id: null,
         raw_payload: {},
+        enriched: {},
         received_at: '2026-01-01T12:00:00Z',
         platform_mode: 'datacenter',
         ...overrides,
