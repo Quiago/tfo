@@ -184,6 +184,50 @@ async def _test_email(config: dict) -> tuple[bool, str]:
 
 # ── Action dispatch ───────────────────────────────────────────────────────────
 
+async def execute_integration_direct(
+    integration_id: str,
+    action_type: str,
+    overrides: dict,
+    session: Session,
+) -> dict:
+    """
+    Execute an integration action directly from the agent (no AlarmEvent).
+    Creates a minimal stub event so the existing _do_* helpers work unchanged.
+    """
+    from dataclasses import dataclass
+
+    @dataclass
+    class _StubEvent:
+        id: str = "agent-direct"
+        title: str = ""
+        severity: str = "info"
+        asset_id: str | None = None
+        source_connector_id: str | None = "agent"
+
+    cfg = session.get(IntegrationConfig, integration_id)
+    if not cfg or not cfg.is_active:
+        return {"type": action_type, "status": "error", "error": f"Integration {integration_id} not found or inactive"}
+
+    config = decrypt_config(cfg.config_encrypted)
+    stub = _StubEvent(
+        title=overrides.get("title", ""),
+        severity=overrides.get("severity", "info"),
+        asset_id=overrides.get("asset_id"),
+    )
+
+    try:
+        if action_type == "send_teams":
+            return await _do_send_teams(config, overrides, stub)  # type: ignore[arg-type]
+        if action_type == "create_servicenow_incident":
+            return await _do_create_servicenow(config, overrides, stub)  # type: ignore[arg-type]
+        if action_type == "send_email":
+            return await _do_send_email(config, overrides, stub)  # type: ignore[arg-type]
+        return {"type": action_type, "status": "error", "error": f"Unknown action type: {action_type}"}
+    except Exception as exc:
+        logger.exception("execute_integration_direct_error — type=%s integration=%s", action_type, integration_id)
+        return {"type": action_type, "status": "error", "error": str(exc)}
+
+
 async def dispatch_action(action: dict, event: "AlarmEvent", session: Session) -> dict:
     """
     Execute an integration action triggered by the Dispatcher.

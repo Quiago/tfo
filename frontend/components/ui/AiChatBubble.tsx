@@ -14,8 +14,10 @@ import type { LucideIcon } from 'lucide-react'
 import {
     AlertCircle, ArrowUp, BookOpen, Brain, ChevronDown,
     FileText, Loader2, MessageSquare, Monitor, Paperclip, Plus,
-    Sparkles, Trash2, Upload, Wrench, X,
+    PlugZap, Sparkles, Trash2, Upload, Wrench, X, Zap,
 } from 'lucide-react'
+import { fetchIntegrations } from '@/lib/services/integrations.service'
+import type { IntegrationConfig } from '@/lib/types/integrations'
 import { useCallback, useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react'
 
 // ─── LOGO ─────────────────────────────────────────────────────────────────────
@@ -205,9 +207,32 @@ function getContextSuggestions(
     return out.slice(0, 4)
 }
 
+// ─── INTEGRATION QUICK ACTIONS ────────────────────────────────────────────────
+
+function _getIntegrationActions(intg: IntegrationConfig): { label: string; prompt: string }[] {
+    switch (intg.type) {
+        case 'teams':
+            return [
+                { label: 'Send Teams alert', prompt: `Send a Teams alert via "${intg.name}": ` },
+                { label: 'Notify team on Teams', prompt: `Notify the team via "${intg.name}" Teams channel about: ` },
+            ]
+        case 'servicenow':
+            return [
+                { label: 'Create incident', prompt: `Create a ServiceNow incident via "${intg.name}" for: ` },
+                { label: 'Create change request', prompt: `Create a ServiceNow change request via "${intg.name}" for: ` },
+            ]
+        case 'email':
+            return [
+                { label: 'Send email alert', prompt: `Send an email alert via "${intg.name}" about: ` },
+            ]
+        default:
+            return []
+    }
+}
+
 // ─── SIDE PANEL TAB TYPE ──────────────────────────────────────────────────────
 
-type SideTab = 'conversations' | 'docs' | 'memory'
+type SideTab = 'conversations' | 'docs' | 'memory' | 'actions'
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
@@ -248,6 +273,10 @@ export function AiChatBubble() {
     const [memories, setMemories] = useState<MemoryEntry[]>([])
     const [loadingMem, setLoadingMem] = useState(false)
     const [newMemory, setNewMemory] = useState('')
+
+    // Integrations (for Actions tab)
+    const [integrations, setIntegrations] = useState<IntegrationConfig[]>([])
+    const [loadingIntegrations, setLoadingIntegrations] = useState(false)
 
     // Error
     const [error, setError] = useState<string | null>(null)
@@ -310,6 +339,13 @@ export function AiChatBubble() {
         if (activeTab === 'memory') {
             setLoadingMem(true)
             listMemories().then(setMemories).catch(console.error).finally(() => setLoadingMem(false))
+        }
+        if (activeTab === 'actions') {
+            setLoadingIntegrations(true)
+            fetchIntegrations()
+                .then(data => setIntegrations(data.items))
+                .catch(console.error)
+                .finally(() => setLoadingIntegrations(false))
         }
     }, [sideOpen, activeTab])
 
@@ -644,6 +680,7 @@ export function AiChatBubble() {
                                     ['conversations', MessageSquare, 'Conversations'],
                                     ['docs', FileText, 'Documents'],
                                     ['memory', Brain, 'Memory'],
+                                    ['actions', Zap, 'Actions'],
                                 ] as [SideTab, ComponentType<{ size?: number | string }>, string][]).map(([tab, Icon, label]) => (
                                     <button
                                         key={tab}
@@ -782,6 +819,59 @@ export function AiChatBubble() {
                                                 </button>
                                             </div>
                                         ))}
+                                    </>
+                                )}
+
+                                {/* Actions */}
+                                {activeTab === 'actions' && (
+                                    <>
+                                        {/* Screen-context quick actions */}
+                                        <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wide px-1 mb-1.5 mt-0.5">
+                                            Quick actions
+                                        </p>
+                                        {getContextSuggestions(
+                                            screenCtx.activeModule ?? '',
+                                            screenCtx.selectedTeamName ?? null,
+                                            !!screenCtx.dateRange,
+                                        ).map(({ label, prompt, Icon }) => (
+                                            <button
+                                                key={label}
+                                                onClick={() => { setInput(prompt); inputRef.current?.focus() }}
+                                                className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 hover:bg-[#F2F5FF] transition-colors text-left group"
+                                            >
+                                                <Icon size={12} className="text-[#98A6D4] flex-shrink-0" />
+                                                <span className="text-xs text-[#3A3A3A] leading-tight">{label}</span>
+                                            </button>
+                                        ))}
+
+                                        {/* Integration actions */}
+                                        <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wide px-1 mt-3 mb-1.5">
+                                            Integrations
+                                        </p>
+                                        {loadingIntegrations && (
+                                            <div className="flex justify-center py-3">
+                                                <Loader2 size={13} className="animate-spin text-zinc-400" />
+                                            </div>
+                                        )}
+                                        {!loadingIntegrations && integrations.filter(i => i.is_active).length === 0 && (
+                                            <p className="text-xs text-zinc-400 text-center py-3">No active integrations</p>
+                                        )}
+                                        {integrations.filter(i => i.is_active).map(intg => {
+                                            const actions = _getIntegrationActions(intg)
+                                            return actions.map(({ label, prompt }) => (
+                                                <button
+                                                    key={`${intg.id}-${label}`}
+                                                    onClick={() => { setInput(prompt); inputRef.current?.focus() }}
+                                                    className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 hover:bg-[#F2F5FF] transition-colors text-left"
+                                                >
+                                                    <PlugZap size={12} className="text-violet-400 flex-shrink-0" />
+                                                    <div className="min-w-0">
+                                                        <span className="text-xs text-[#3A3A3A] leading-tight block truncate">{label}</span>
+                                                        <span className="text-[10px] text-zinc-400 truncate block">{intg.name}</span>
+                                                    </div>
+                                                </button>
+                                            ))
+                                        })}
                                     </>
                                 )}
                             </div>
@@ -1010,18 +1100,27 @@ export function AiChatBubble() {
 
                                 {/* Bottom toolbar: attach · model selector · send */}
                                 <div className="flex items-center justify-between mt-1.5">
-                                    {/* Left: attach */}
-                                    <button
-                                        onClick={() => fileInputRef.current?.click()}
-                                        disabled={uploadingDoc}
-                                        title="Upload document to knowledge base"
-                                        className="w-6 h-6 flex items-center justify-center text-zinc-400 hover:text-[#3A3A3A] transition-colors flex-shrink-0 disabled:opacity-40"
-                                    >
-                                        {uploadingDoc
-                                            ? <Loader2 size={13} className="animate-spin" />
-                                            : <Paperclip size={13} />
-                                        }
-                                    </button>
+                                    {/* Left: attach + integrations */}
+                                    <div className="flex items-center gap-1">
+                                        <button
+                                            onClick={() => fileInputRef.current?.click()}
+                                            disabled={uploadingDoc}
+                                            title="Upload document to knowledge base"
+                                            className="w-6 h-6 flex items-center justify-center text-zinc-400 hover:text-[#3A3A3A] transition-colors flex-shrink-0 disabled:opacity-40"
+                                        >
+                                            {uploadingDoc
+                                                ? <Loader2 size={13} className="animate-spin" />
+                                                : <Paperclip size={13} />
+                                            }
+                                        </button>
+                                        <button
+                                            onClick={() => { setSideOpen(true); setActiveTab('actions') }}
+                                            title="Actions & Integrations"
+                                            className={`w-6 h-6 flex items-center justify-center transition-colors flex-shrink-0 ${activeTab === 'actions' && sideOpen ? 'text-violet-500' : 'text-zinc-400 hover:text-violet-500'}`}
+                                        >
+                                            <PlugZap size={13} />
+                                        </button>
+                                    </div>
 
                                     {/* Right: model selector + send */}
                                     <div className="flex items-center gap-1.5">

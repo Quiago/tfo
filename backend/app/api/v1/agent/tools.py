@@ -29,6 +29,137 @@ PLATFORM_TOOL_SCHEMAS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "list_integrations",
+            "description": (
+                "Returns the list of active external integrations (Teams, ServiceNow, Email). "
+                "Call this before send_teams_message / create_servicenow_incident / send_email_alert "
+                "to discover available integration IDs. Returns name, type, and id for each."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_teams_message",
+            "description": (
+                "Sends an Adaptive Card alert to a Microsoft Teams channel via a configured webhook integration. "
+                "Use when the user asks to notify the team, send a Teams alert, or post to Teams."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "integration_id": {
+                        "type": "string",
+                        "description": "The Teams integration ID (get from list_integrations).",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Card title / alert heading.",
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Body text of the card.",
+                    },
+                    "severity": {
+                        "type": "string",
+                        "enum": ["info", "warning", "critical", "emergency"],
+                        "description": "Severity level of the alert (default: info).",
+                    },
+                    "asset_id": {
+                        "type": "string",
+                        "description": "Optional asset ID related to this alert.",
+                    },
+                },
+                "required": ["integration_id", "title", "message"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_servicenow_incident",
+            "description": (
+                "Creates an Incident (or other record) in ServiceNow via the Table API. "
+                "Use when the user asks to open a ticket, create an incident, or log an issue in ServiceNow."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "integration_id": {
+                        "type": "string",
+                        "description": "The ServiceNow integration ID (get from list_integrations).",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Short description of the incident.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Detailed description / additional context.",
+                    },
+                    "severity": {
+                        "type": "string",
+                        "enum": ["info", "warning", "critical", "emergency"],
+                        "description": "Severity (maps to impact/urgency). Default: warning.",
+                    },
+                    "assignment_group": {
+                        "type": "string",
+                        "description": "ServiceNow assignment group override (e.g. 'NOC').",
+                    },
+                    "table": {
+                        "type": "string",
+                        "description": "ServiceNow table (default: incident).",
+                    },
+                },
+                "required": ["integration_id", "title"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_email_alert",
+            "description": (
+                "Sends an alert email via SMTP relay through a configured email integration. "
+                "Use when the user asks to send an email, notify by email, or email a team."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "integration_id": {
+                        "type": "string",
+                        "description": "The email integration ID (get from list_integrations).",
+                    },
+                    "subject": {
+                        "type": "string",
+                        "description": "Email subject line (severity prefix will be prepended automatically).",
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Plain-text body of the email.",
+                    },
+                    "to": {
+                        "type": "string",
+                        "description": "Comma-separated recipients override. Leave empty to use integration defaults.",
+                    },
+                    "severity": {
+                        "type": "string",
+                        "enum": ["info", "warning", "critical", "emergency"],
+                        "description": "Severity prefix prepended to the subject (default: info).",
+                    },
+                },
+                "required": ["integration_id", "subject", "body"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_screen_context",
             "description": (
                 "Returns a structured snapshot of what the user is currently viewing on the dashboard: "
@@ -85,6 +216,75 @@ PLATFORM_TOOL_SCHEMAS: list[dict] = [
 
 
 # ── Platform tool implementations ─────────────────────────────────────────────
+
+async def _list_integrations(
+    screen_context: ScreenContext,  # noqa: ARG001
+    session: Session,
+) -> str:
+    from app.api.v1.integrations.service import get_all as _get_all_integrations
+    items = _get_all_integrations(session)
+    active = [
+        {"id": i.id, "name": i.name, "type": i.type.value, "is_active": i.is_active}
+        for i in items if i.is_active
+    ]
+    return json.dumps({"count": len(active), "integrations": active})
+
+
+async def _send_teams_message(
+    screen_context: ScreenContext,  # noqa: ARG001
+    session: Session,
+    integration_id: str,
+    title: str,
+    message: str,
+    severity: str = "info",
+    asset_id: str | None = None,
+) -> str:
+    from app.api.v1.integrations.service import execute_integration_direct
+    result = await execute_integration_direct(
+        integration_id,
+        "send_teams",
+        {"title": title, "body": message, "severity": severity, "asset_id": asset_id},
+        session,
+    )
+    return json.dumps(result)
+
+
+async def _create_servicenow_incident(
+    screen_context: ScreenContext,  # noqa: ARG001
+    session: Session,
+    integration_id: str,
+    title: str,
+    description: str = "",
+    severity: str = "warning",
+    assignment_group: str = "",
+    table: str = "incident",
+) -> str:
+    from app.api.v1.integrations.service import execute_integration_direct
+    overrides: dict[str, Any] = {"title": title, "severity": severity, "table": table}
+    if description:
+        overrides["body"] = description
+    if assignment_group:
+        overrides["assignment_group"] = assignment_group
+    result = await execute_integration_direct(integration_id, "create_servicenow_incident", overrides, session)
+    return json.dumps(result)
+
+
+async def _send_email_alert(
+    screen_context: ScreenContext,  # noqa: ARG001
+    session: Session,
+    integration_id: str,
+    subject: str,
+    body: str,
+    to: str = "",
+    severity: str = "info",
+) -> str:
+    from app.api.v1.integrations.service import execute_integration_direct
+    overrides: dict[str, Any] = {"subject": subject, "body": body, "severity": severity}
+    if to:
+        overrides["to"] = [addr.strip() for addr in to.split(",") if addr.strip()]
+    result = await execute_integration_direct(integration_id, "send_email", overrides, session)
+    return json.dumps(result)
+
 
 async def _get_screen_context(
     screen_context: ScreenContext,
@@ -172,6 +372,10 @@ _PLATFORM_REGISTRY: dict[str, Any] = {
     "get_screen_context": _get_screen_context,
     "analyze_focused_asset": _analyze_focused_asset,
     "analyze_selected_range": _analyze_selected_range,
+    "list_integrations": _list_integrations,
+    "send_teams_message": _send_teams_message,
+    "create_servicenow_incident": _create_servicenow_incident,
+    "send_email_alert": _send_email_alert,
 }
 
 
