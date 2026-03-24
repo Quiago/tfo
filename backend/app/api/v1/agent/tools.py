@@ -344,13 +344,16 @@ async def _analyze_selected_range(
         "agent_tool — analyze_selected_range start=%s end=%s",
         fmt(start_ms), fmt(end_ms),
     )
-    # signal_ids=[] → returns stats for ALL signals active in the range
+    # signal_ids=[] → returns stats for ALL signals active in the range.
+    # No connector_id filter — the timeline chart also queries without it, mixing
+    # startup backfill data (connector_id="_startup_") with live OPC UA readings.
+    # Filtering by active_connector_id would miss historical synthetic data.
     stats = get_statistics_absolute(
         session,
         signal_ids=[],
         start_ms=start_ms,
         end_ms=end_ms,
-        connector_id=screen_context.active_connector_id,
+        connector_id=None,
     )
     if not stats:
         return json.dumps({
