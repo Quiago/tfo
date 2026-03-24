@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { fetchIntegrations } from '@/lib/services/integrations.service'
 import type { IntegrationConfig } from '@/lib/types/integrations'
+import { ConnectorsModal } from '@/components/ui/ConnectorsModal'
 import { useCallback, useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react'
 
 // ─── LOGO ─────────────────────────────────────────────────────────────────────
@@ -285,6 +286,9 @@ export function AiChatBubble() {
     // Integrations (for Actions tab)
     const [integrations, setIntegrations] = useState<IntegrationConfig[]>([])
     const [loadingIntegrations, setLoadingIntegrations] = useState(false)
+
+    // Connectors modal
+    const [connectorsOpen, setConnectorsOpen] = useState(false)
 
     // Error
     const [error, setError] = useState<string | null>(null)
@@ -1135,16 +1139,9 @@ export function AiChatBubble() {
                                             }
                                         </button>
                                         <button
-                                            onClick={() => {
-                                                if (sideOpen && activeTab === 'actions') {
-                                                    setSideOpen(false)
-                                                } else {
-                                                    setSideOpen(true)
-                                                    setActiveTab('actions')
-                                                }
-                                            }}
-                                            title={sideOpen && activeTab === 'actions' ? 'Close Actions panel' : 'Actions & Integrations'}
-                                            className={`w-6 h-6 flex items-center justify-center transition-colors flex-shrink-0 rounded ${sideOpen && activeTab === 'actions' ? 'text-violet-500 bg-violet-50' : 'text-zinc-400 hover:text-violet-500'}`}
+                                            onClick={() => setConnectorsOpen(true)}
+                                            title="Connectors & Integrations"
+                                            className="w-6 h-6 flex items-center justify-center transition-colors flex-shrink-0 rounded text-zinc-400 hover:text-violet-500"
                                         >
                                             <PlugZap size={13} />
                                         </button>
@@ -1257,6 +1254,8 @@ export function AiChatBubble() {
             >
                 {open ? <X size={24} /> : <OpsFlowLogo className="w-8 h-8" />}
             </button>
+
+            <ConnectorsModal open={connectorsOpen} onClose={() => setConnectorsOpen(false)} />
         </>
     )
 }
