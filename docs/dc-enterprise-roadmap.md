@@ -12,7 +12,7 @@
 | Fase | Nombre | Estado | Commit |
 |------|--------|--------|--------|
 | 0 | Event Dispatcher Core | ✅ Completo | 6c9bc89 |
-| 1 | M365 Teams + ServiceNow | ⬜ Pendiente | — |
+| 1 | M365 Teams + ServiceNow | ✅ Completo | 4193156 |
 | 2 | Alarm Management Console | ⬜ Pendiente | — |
 | 3 | RBAC + Audit Trail | ⬜ Pendiente | — |
 | 4 | Shift Handover Module | ⬜ Pendiente | — |
@@ -145,52 +145,52 @@ Usar `AlarmSimulator` (visible en demo mode) para generar eventos: CRAC failure 
 
 ### Checklist Backend
 
-- [ ] `backend/app/api/v1/connectors/backends/teams.py`
-  - [ ] `TeamsConnector(ConnectorBackend)`: write via Incoming Webhook, health check
-  - [ ] Adaptive Card template (JSON) para alertas con severity color coding
-  - [ ] Registrar en `_REGISTRY` como `ConnectorType.teams`
-- [ ] `backend/app/api/v1/connectors/backends/servicenow.py`
-  - [ ] `ServiceNowConnector(ConnectorBackend)`: read/write incidents y change_requests
-  - [ ] `health()` → GET /api/now/table/sys_user?sysparm_limit=1
-  - [ ] `discover()` → tablas disponibles (incident, problem, change_request)
-  - [ ] Registrar en `_REGISTRY` como `ConnectorType.servicenow`
-- [ ] `backend/app/api/v1/connectors/backends/smtp_email.py`
-  - [ ] `SMTPEmailConnector(ConnectorBackend)`: send via SMTP o M365 Mail
-  - [ ] Registrar en `_REGISTRY` como `ConnectorType.email`
-- [ ] `backend/app/api/v1/integrations/models.py`
-  - [ ] `IntegrationConfig`: id, name, type, config_encrypted(JSON), platform_mode, is_active, last_tested_at, last_test_status
-- [ ] `backend/app/api/v1/integrations/schemas.py`
-  - [ ] `IntegrationCreate`, `IntegrationOut`, `IntegrationTestResult`
-- [ ] `backend/app/api/v1/integrations/service.py`
-  - [ ] `create()`, `update()`, `delete()`, `test_connection()`, `dispatch_action()`
-  - [ ] Encriptación de config en reposo (Fernet)
-- [ ] `backend/app/api/v1/integrations/router.py`
-  - [ ] CRUD `/integrations`
-  - [ ] `POST /integrations/{id}/test`
-- [ ] Dispatcher `action_types` expandido: `send_teams`, `create_servicenow_incident`, `send_email`
-- [ ] `backend/app/db/engine.py` — migración `integration_configs` tabla
+- [x] `backend/app/api/v1/connectors/backends/teams.py`
+  - [x] `TeamsConnector(ConnectorBackend)`: write via Incoming Webhook, health check
+  - [x] Adaptive Card template (JSON) para alertas con severity color coding
+  - [x] Registrar en `_REGISTRY` como `ConnectorType.teams`
+- [x] `backend/app/api/v1/connectors/backends/servicenow.py`
+  - [x] `ServiceNowConnector(ConnectorBackend)`: read/write incidents y change_requests
+  - [x] `health()` → GET /api/now/table/sys_user?sysparm_limit=1
+  - [x] `discover()` → tablas disponibles (incident, problem, change_request)
+  - [x] Registrar en `_REGISTRY` como `ConnectorType.servicenow`
+- [x] `backend/app/api/v1/connectors/backends/smtp_email.py`
+  - [x] `SMTPEmailConnector(ConnectorBackend)`: send via SMTP o M365 Mail
+  - [x] Registrar en `_REGISTRY` como `ConnectorType.email`
+- [x] `backend/app/api/v1/integrations/models.py`
+  - [x] `IntegrationConfig`: id, name, type, config_encrypted(JSON), platform_mode, is_active, last_tested_at, last_test_status
+- [x] `backend/app/api/v1/integrations/schemas.py`
+  - [x] `IntegrationCreate`, `IntegrationOut`, `IntegrationTestResult`
+- [x] `backend/app/api/v1/integrations/service.py`
+  - [x] `create()`, `update()`, `delete()`, `test_connection()`, `dispatch_action()`
+  - [x] Encriptación de config en reposo (Fernet)
+- [x] `backend/app/api/v1/integrations/router.py`
+  - [x] CRUD `/integrations`
+  - [x] `POST /integrations/{id}/test`
+- [x] Dispatcher `action_types` expandido: `send_teams`, `create_servicenow_incident`, `send_email`
+- [x] `backend/app/db/engine.py` — migración `integration_configs` tabla
 
 ### Checklist Frontend
 
-- [ ] `frontend/lib/types/integrations.ts`
-- [ ] `frontend/lib/services/integrations.service.ts`
-- [ ] `frontend/components/integrations/IntegrationsList.tsx`
-- [ ] `frontend/components/integrations/IntegrationForm.tsx`
-  - [ ] Teams: webhook URL field
-  - [ ] ServiceNow: instance URL, username, password fields
-  - [ ] Email: SMTP host, port, credentials
-- [ ] `frontend/components/integrations/IntegrationTestModal.tsx`
-- [ ] `frontend/components/integrations/IntegrationBadge.tsx`
-- [ ] `frontend/components/dispatcher/ActionListEditor.tsx` — añadir tipos `send_teams`, `create_servicenow_incident`
-- [ ] Sección Integrations en nav/settings (datacenter mode only)
+- [x] `frontend/lib/types/integrations.ts`
+- [x] `frontend/lib/services/integrations.service.ts`
+- [x] `frontend/components/integrations/IntegrationsList.tsx`
+- [x] `frontend/components/integrations/IntegrationForm.tsx`
+  - [x] Teams: webhook URL field
+  - [x] ServiceNow: instance URL, username, password fields
+  - [x] Email: SMTP host, port, credentials
+- [x] `frontend/components/integrations/IntegrationTestModal.tsx`
+- [x] `frontend/components/integrations/IntegrationBadge.tsx`
+- [x] `frontend/components/dispatcher/ActionListEditor.tsx` — añadir tipos `send_teams`, `create_servicenow_incident`, `send_email`
+- [x] Sección Integrations como tab en EventManagementConsole (datacenter mode only)
 
 ### Checklist Tests
 
-- [ ] `backend/tests/integrations/test_teams_backend.py` — mock webhook responses
-- [ ] `backend/tests/integrations/test_servicenow_backend.py` — mock SN REST API
-- [ ] `backend/tests/integrations/test_smtp_backend.py` — mock SMTP send
-- [ ] `backend/tests/integrations/test_integration_service.py` — CRUD + dispatch
-- [ ] `backend/tests/integrations/test_integration_router.py` — HTTP endpoints
+- [x] `backend/tests/integrations/test_teams_backend.py` — 12 tests, mock webhook responses
+- [x] `backend/tests/integrations/test_servicenow_backend.py` — 13 tests, mock SN REST API
+- [x] `backend/tests/integrations/test_smtp_backend.py` — 11 tests, mock SMTP send
+- [x] `backend/tests/integrations/test_integration_service.py` — 16 tests, CRUD + dispatch
+- [x] `backend/tests/integrations/test_integration_router.py` — 11 tests, HTTP endpoints
 
 ### Demo sin DC
 1. Teams: workspace gratuito → Incoming Webhook → pegar URL → Test → verificar card en Teams

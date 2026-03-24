@@ -6,7 +6,7 @@ export type EventStatus   = 'pending' | 'matched' | 'no_match' | 'executing' | '
 export type RuleOperator  = 'AND' | 'OR'
 export type ConditionType = 'severity_gte' | 'contains' | 'threshold' | 'asset_tag' | 'connector_id'
 export type ThresholdOp   = 'gt' | 'gte' | 'lt' | 'lte' | 'eq'
-export type ActionType    = 'log_only' | 'create_work_order'
+export type ActionType    = 'log_only' | 'create_work_order' | 'send_teams' | 'create_servicenow_incident' | 'send_email'
 export type ExecutionStatus = 'pending' | 'running' | 'completed' | 'failed'
 
 // ─── Events ───────────────────────────────────────────────────────────────────

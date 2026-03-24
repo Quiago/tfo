@@ -1,30 +1,67 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { X, Plus } from 'lucide-react'
-import type { RuleAction } from '@/lib/types/dispatcher'
+import type { ActionType, RuleAction } from '@/lib/types/dispatcher'
+import type { IntegrationConfig, IntegrationType } from '@/lib/types/integrations'
+import { fetchIntegrations } from '@/lib/services/integrations.service'
 
 interface Props {
     value: RuleAction[]
     onChange: (value: RuleAction[]) => void
 }
 
-// Phase 0 actions.  Phase 1 will add: send_teams, create_servicenow_incident, send_email
-const ACTION_TYPES: { value: RuleAction['type']; label: string; description: string }[] = [
-    { value: 'log_only',          label: 'Log only',          description: 'Write event to server log (always safe, good for testing)' },
-    { value: 'create_work_order', label: 'Create work order', description: 'Create a work order in OpsHub (Phase 1: real integration)' },
+const ACTION_TYPES: { value: ActionType; label: string; description: string; integrationRequired?: IntegrationType }[] = [
+    { value: 'log_only',                    label: 'Log only',                    description: 'Write event to server log (always safe, good for testing)' },
+    { value: 'create_work_order',           label: 'Create work order',           description: 'Create a work order in OpsHub' },
+    { value: 'send_teams',                  label: 'Send Teams message',          description: 'Send an Adaptive Card to a Microsoft Teams channel', integrationRequired: 'teams' },
+    { value: 'create_servicenow_incident',  label: 'Create ServiceNow incident',  description: 'Create an Incident in ServiceNow via Table API', integrationRequired: 'servicenow' },
+    { value: 'send_email',                  label: 'Send email',                  description: 'Send an alert email via SMTP relay', integrationRequired: 'email' },
 ]
 
 const inputCls = 'w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-white outline-none focus:border-violet-500 transition-colors'
 const selectCls = `${inputCls} appearance-none`
 
+function IntegrationSelect({
+    type,
+    value,
+    onChange,
+    integrations,
+}: {
+    type: IntegrationType
+    value: string
+    onChange: (id: string) => void
+    integrations: IntegrationConfig[]
+}) {
+    const filtered = integrations.filter(i => i.type === type && i.is_active)
+    return (
+        <div>
+            <label className="block text-[11px] text-zinc-500 mb-1">Integration *</label>
+            <select value={value} onChange={e => onChange(e.target.value)} className={selectCls}>
+                <option value="">— Select integration —</option>
+                {filtered.map(i => (
+                    <option key={i.id} value={i.id}>{i.name}</option>
+                ))}
+            </select>
+            {filtered.length === 0 && (
+                <p className="text-[11px] text-amber-500 mt-1">
+                    No active {type} integration. Add one in the Integrations tab.
+                </p>
+            )}
+        </div>
+    )
+}
+
 function ActionItem({
     action,
     onUpdate,
     onRemove,
+    integrations,
 }: {
-    action: RuleAction
-    onUpdate: (patch: Partial<RuleAction>) => void
+    action: RuleAction & { type: ActionType }
+    onUpdate: (patch: Partial<typeof action>) => void
     onRemove: () => void
+    integrations: IntegrationConfig[]
 }) {
     const meta = ACTION_TYPES.find((a) => a.value === action.type)
 
@@ -33,7 +70,7 @@ function ActionItem({
             <div className="flex items-center gap-2">
                 <select
                     value={action.type}
-                    onChange={(e) => onUpdate({ type: e.target.value as RuleAction['type'], config: {} })}
+                    onChange={(e) => onUpdate({ type: e.target.value as ActionType, config: {} })}
                     className={`${selectCls} flex-1`}
                 >
                     {ACTION_TYPES.map((a) => (
@@ -79,13 +116,84 @@ function ActionItem({
                     </div>
                 </div>
             )}
+
+            {/* send_teams config */}
+            {action.type === 'send_teams' && (
+                <div className="space-y-2">
+                    <IntegrationSelect
+                        type="teams"
+                        value={String(action.config.integration_id ?? '')}
+                        onChange={id => onUpdate({ config: { ...action.config, integration_id: id } })}
+                        integrations={integrations}
+                    />
+                </div>
+            )}
+
+            {/* create_servicenow_incident config */}
+            {action.type === 'create_servicenow_incident' && (
+                <div className="space-y-2">
+                    <IntegrationSelect
+                        type="servicenow"
+                        value={String(action.config.integration_id ?? '')}
+                        onChange={id => onUpdate({ config: { ...action.config, integration_id: id } })}
+                        integrations={integrations}
+                    />
+                    <div>
+                        <label className="block text-[11px] text-zinc-500 mb-1">Table (default: incident)</label>
+                        <input
+                            value={String(action.config.table ?? '')}
+                            onChange={e => onUpdate({ config: { ...action.config, table: e.target.value } })}
+                            placeholder="incident"
+                            className={inputCls}
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-[11px] text-zinc-500 mb-1">Assignment Group (override)</label>
+                        <input
+                            value={String(action.config.assignment_group ?? '')}
+                            onChange={e => onUpdate({ config: { ...action.config, assignment_group: e.target.value } })}
+                            placeholder="NOC"
+                            className={inputCls}
+                        />
+                    </div>
+                </div>
+            )}
+
+            {/* send_email config */}
+            {action.type === 'send_email' && (
+                <div className="space-y-2">
+                    <IntegrationSelect
+                        type="email"
+                        value={String(action.config.integration_id ?? '')}
+                        onChange={id => onUpdate({ config: { ...action.config, integration_id: id } })}
+                        integrations={integrations}
+                    />
+                    <div>
+                        <label className="block text-[11px] text-zinc-500 mb-1">Recipients override (comma-separated)</label>
+                        <input
+                            value={String(action.config.to ?? '')}
+                            onChange={e => onUpdate({ config: { ...action.config, to: e.target.value } })}
+                            placeholder="ops@company.com (leave empty to use integration defaults)"
+                            className={inputCls}
+                        />
+                    </div>
+                </div>
+            )}
         </div>
     )
 }
 
 export function ActionListEditor({ value, onChange }: Props) {
-    const updateItem = (idx: number, patch: Partial<RuleAction>) =>
-        onChange(value.map((a, i) => (i === idx ? { ...a, ...patch } : a)))
+    const [integrations, setIntegrations] = useState<IntegrationConfig[]>([])
+
+    useEffect(() => {
+        fetchIntegrations()
+            .then(data => setIntegrations(data.items))
+            .catch(() => { /* non-critical — just won't pre-fill selects */ })
+    }, [])
+
+    const updateItem = (idx: number, patch: Partial<RuleAction & { type: ActionType }>) =>
+        onChange(value.map((a, i) => (i === idx ? { ...a, ...patch } : a)) as RuleAction[])
 
     const removeItem = (idx: number) =>
         onChange(value.filter((_, i) => i !== idx))
@@ -98,9 +206,10 @@ export function ActionListEditor({ value, onChange }: Props) {
             {value.map((action, idx) => (
                 <ActionItem
                     key={idx}
-                    action={action}
+                    action={action as RuleAction & { type: ActionType }}
                     onUpdate={(patch) => updateItem(idx, patch)}
                     onRemove={() => removeItem(idx)}
+                    integrations={integrations}
                 />
             ))}
 

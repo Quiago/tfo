@@ -17,13 +17,15 @@
 import { useState } from 'react'
 import { useAuthStore } from '@/lib/store/auth-store'
 import { DispatcherConsole } from '@/components/dispatcher/DispatcherConsole'
+import { IntegrationsList } from '@/components/integrations/IntegrationsList'
 import { Zap } from 'lucide-react'
 
-type EventsTab = 'dispatcher'
+type EventsTab = 'dispatcher' | 'integrations'
 // Future tabs: 'alarms' | 'suppressions' | 'escalations'
 
 const TABS: { id: EventsTab; label: string }[] = [
-    { id: 'dispatcher', label: 'Event Dispatcher' },
+    { id: 'dispatcher',   label: 'Event Dispatcher' },
+    { id: 'integrations', label: 'Integrations' },
 ]
 
 export function EventManagementConsole() {
@@ -64,7 +66,8 @@ export function EventManagementConsole() {
 
             {/* ── Content ── */}
             <div className="flex-1 min-h-0 overflow-hidden">
-                {activeTab === 'dispatcher' && <DispatcherConsole />}
+                {activeTab === 'dispatcher'   && <DispatcherConsole />}
+                {activeTab === 'integrations' && <IntegrationsList />}
             </div>
         </div>
     )
