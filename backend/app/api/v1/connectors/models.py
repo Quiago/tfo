@@ -18,6 +18,9 @@ class ConnectorType(StrEnum):
     rest = "rest"
     mcp = "mcp"
     webhook = "webhook"
+    teams = "teams"
+    servicenow = "servicenow"
+    email = "email"
 
 
 class Connector(SQLModel, table=True):

@@ -19,6 +19,9 @@ from app.api.v1.connectors.backends.mqtt import MQTTConnector
 from app.api.v1.connectors.backends.opcua import OPCUAConnector
 from app.api.v1.connectors.backends.rest import RESTConnector
 from app.api.v1.connectors.backends.webhook import WebhookConnector
+from app.api.v1.connectors.backends.teams import TeamsConnector
+from app.api.v1.connectors.backends.servicenow import ServiceNowConnector
+from app.api.v1.connectors.backends.smtp_email import SMTPEmailConnector
 from app.api.v1.connectors.exceptions import (
     BackendNotImplemented, ConnectorAlreadyExists, ConnectorInactive,
     ConnectorNotFound, ConnectorReadError, ConnectorUnreachable, ConnectorWriteError,
@@ -29,11 +32,14 @@ from app.api.v1.connectors.schemas import ConnectorCreate, ConnectorUpdate
 logger = logging.getLogger(__name__)
 
 _REGISTRY: dict[ConnectorType, type[ConnectorBackend]] = {
-    ConnectorType.opcua: OPCUAConnector,
-    ConnectorType.mqtt: MQTTConnector,
-    ConnectorType.rest: RESTConnector,
-    ConnectorType.mcp: MCPConnector,
-    ConnectorType.webhook: WebhookConnector,
+    ConnectorType.opcua:       OPCUAConnector,
+    ConnectorType.mqtt:        MQTTConnector,
+    ConnectorType.rest:        RESTConnector,
+    ConnectorType.mcp:         MCPConnector,
+    ConnectorType.webhook:     WebhookConnector,
+    ConnectorType.teams:       TeamsConnector,
+    ConnectorType.servicenow:  ServiceNowConnector,
+    ConnectorType.email:       SMTPEmailConnector,
 }
 
 _DISCOVERY_TTL_SECONDS = 300

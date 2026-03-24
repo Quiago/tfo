@@ -147,11 +147,14 @@ async def intake(
 
 async def _execute_action(action: dict, event: AlarmEvent, session: Session) -> dict:
     """
-    Execute a single action dict.  Returns a result dict that is stored in
+    Execute a single action dict.  Returns a result dict stored in
     DispatchExecution.action_results.
 
-    Phase 0 supports: log_only, create_work_order (stub — real impl in Phase 1)
+    Phase 0: log_only, create_work_order (stub)
+    Phase 1: send_teams, create_servicenow_incident, send_email (real HTTP)
     """
+    from app.api.v1.integrations import service as integration_service
+
     action_type: str = action.get("type", "log_only")
     config: dict = action.get("config", {})
 
@@ -163,17 +166,17 @@ async def _execute_action(action: dict, event: AlarmEvent, session: Session) -> 
         return {"type": "log_only", "status": "ok", "logged_at": datetime.now(UTC).isoformat()}
 
     if action_type == "create_work_order":
-        # Stub: Phase 1 will call the real OpsHub work-order creation endpoint.
-        logger.info(
-            "dispatcher_action_create_wo — event=%s config=%s",
-            event.id, config,
-        )
+        logger.info("dispatcher_action_create_wo — event=%s config=%s", event.id, config)
         return {
             "type": "create_work_order",
             "status": "pending_integration",
-            "note": "Real work-order creation will be wired in Phase 1",
+            "note": "Real work-order creation wired in Phase 1",
             "config": config,
         }
+
+    # Phase 1 integration actions — delegate to integrations service
+    if action_type in ("send_teams", "create_servicenow_incident", "send_email"):
+        return await integration_service.dispatch_action(action, event, session)
 
     logger.warning("dispatcher_unknown_action — type=%s", action_type)
     return {"type": action_type, "status": "unknown_action_type"}
