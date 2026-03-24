@@ -2,12 +2,13 @@
 VLLMEngine — wrapper del motor de inferencia con detección automática de backend.
 
   CPU  → transformers.pipeline (bloqueante, wrapeado en asyncio.to_thread)
-  GPU  → vLLM AsyncLLMEngine (asíncrono nativo, PagedAttention)
+  GPU  → vLLM AsyncLLMEngine (asíncrono nativo, PagedAttention, CUDA Graphs)
 """
 import asyncio
 import gc
 import logging
 import uuid
+from collections.abc import AsyncGenerator
 from pathlib import Path
 
 import os
@@ -100,7 +101,7 @@ class VLLMEngine:
         """Carga el modelo con vLLM AsyncLLMEngine (GPU)."""
         from vllm import AsyncEngineArgs, AsyncLLMEngine
         os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
-        # En _load_vllm(), antes de args:
+
         if torch.cuda.is_available():
             free, total = torch.cuda.mem_get_info()
             logger.info(f"[Engine] VRAM libre antes de cargar: {free/1024**3:.1f}/{total/1024**3:.1f} GiB")
@@ -110,9 +111,10 @@ class VLLMEngine:
         args = AsyncEngineArgs(
             model=str(model_path),
             dtype=dtype,
-            gpu_memory_utilization=0.75,
-            max_model_len=32768,
-            enforce_eager=True,  
+            quantization="awq",            # Explicit AWQ quantization hint
+            gpu_memory_utilization=0.85,   # More headroom for KV cache (was 0.75)
+            max_model_len=8192,            # Realistic for T4 16GB with 7-10B models (was 32768)
+            enforce_eager=False,           # Enable CUDA Graphs for 30-40% throughput gain (was True)
             tensor_parallel_size=num_gpus,
             trust_remote_code=True,
         )
@@ -120,7 +122,7 @@ class VLLMEngine:
         self._vllm_engine = await asyncio.to_thread(AsyncLLMEngine.from_engine_args, args)
 
         if hasattr(self._vllm_engine, 'engine_core'):
-            torch.cuda.empty_cache() 
+            torch.cuda.empty_cache()
 
         self._current_model_id = model_id
         logger.info(f"[Engine] Listo (vLLM): {model_id}")
@@ -155,6 +157,8 @@ class VLLMEngine:
     async def generate(self, messages: list[dict], max_new_tokens: int = 512, temperature: float = 0.7, tools: list | None = None) -> str:
         """
         Genera texto dado un historial en formato OpenAI messages.
+        Bloquea hasta que la generación completa. Úsalo cuando necesitas el texto
+        completo antes de proceder (p.ej. detección de tool calls en el loop del agente).
         tools: schemas en formato OpenAI. Se pasa a apply_chat_template si el modelo lo soporta.
         """
         logger.debug(
@@ -168,8 +172,36 @@ class VLLMEngine:
             return await self._generate_vllm(messages, max_new_tokens, temperature, tools)
         return await self._generate_transformers(messages, max_new_tokens, temperature, tools)
 
+    async def generate_stream(
+        self,
+        messages: list[dict],
+        max_new_tokens: int = 512,
+        temperature: float = 0.7,
+        tools: list | None = None,
+    ) -> AsyncGenerator[str, None]:
+        """
+        Generador asíncrono que produce deltas de texto conforme el modelo genera.
+
+        En GPU (vLLM): primer delta llega tras el prefill (~0.3-0.8s en T4).
+        En CPU (transformers): no hay streaming real — produce el texto completo
+        como un único chunk al finalizar.
+
+        Úsalo en el chat streaming para que el usuario vea tokens en tiempo real.
+        El agente sigue usando generate() porque necesita el JSON completo para
+        parsear tool calls antes de actuar.
+        """
+        if not self.is_ready:
+            raise RuntimeError("No hay modelo cargado. Llama load() primero.")
+        if _VLLM_AVAILABLE and self._vllm_engine:
+            async for delta in self._generate_vllm_stream(messages, max_new_tokens, temperature, tools):
+                yield delta
+        else:
+            # CPU: no hay streaming nativo en transformers — emitimos todo de golpe
+            full = await self._generate_transformers(messages, max_new_tokens, temperature, tools)
+            yield full
+
     async def _generate_vllm(self, messages: list[dict], max_new_tokens: int, temperature: float, tools: list | None) -> str:
-        """Generación con vLLM."""
+        """Generación bloqueante con vLLM (espera toda la salida)."""
         from vllm import SamplingParams
 
         tokenizer = await asyncio.to_thread(self._vllm_engine.get_tokenizer)
@@ -179,6 +211,31 @@ class VLLMEngine:
         async for output in self._vllm_engine.generate(prompt, params, request_id=str(uuid.uuid4())):
             outputs.append(output)
         return outputs[-1].outputs[0].text
+
+    async def _generate_vllm_stream(
+        self,
+        messages: list[dict],
+        max_new_tokens: int,
+        temperature: float,
+        tools: list | None,
+    ) -> AsyncGenerator[str, None]:
+        """
+        Streaming real de tokens desde vLLM.
+        vLLM devuelve texto ACUMULADO en cada output; calculamos el delta.
+        """
+        from vllm import SamplingParams
+
+        tokenizer = await asyncio.to_thread(self._vllm_engine.get_tokenizer)
+        prompt = self._apply_template(tokenizer, messages, tools)
+        params = SamplingParams(max_tokens=max_new_tokens, temperature=temperature)
+
+        prev_len = 0
+        async for output in self._vllm_engine.generate(prompt, params, request_id=str(uuid.uuid4())):
+            current_text = output.outputs[0].text
+            delta = current_text[prev_len:]
+            prev_len = len(current_text)
+            if delta:
+                yield delta
 
     async def _generate_transformers(self, messages: list[dict], max_new_tokens: int, temperature: float, tools: list | None) -> str:
         """Generación con transformers (CPU). Bloqueante → wrapeado en to_thread."""

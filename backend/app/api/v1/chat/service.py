@@ -11,7 +11,6 @@ Flujo de inferencia (send_message):
   4. Guardar mensaje del assistant.
   5. Actualizar timestamp de la conversación.
 """
-import asyncio
 import json
 import logging
 import re
@@ -41,9 +40,9 @@ _MAX_TOOL_ITERATIONS = 5
 _THINK_CLOSED_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL)
 _THINK_OPEN_RE = re.compile(r"<think>(.*)", re.DOTALL)
 
-# Delay between streamed words (seconds). Keeps SSE frames small enough for the
-# OS TCP stack to flush them individually, producing a visible typing effect.
-_STREAM_WORD_DELAY = 0.01
+# Chars to accumulate before committing to "this is a final answer, not a tool call".
+# Keeps TTFT low while still catching tool-call prefixes reliably.
+_STREAM_LOOKAHEAD = 128
 
 
 def _extract_thinking(text: str) -> tuple[str, str | None]:
@@ -61,6 +60,103 @@ def _extract_thinking(text: str) -> tuple[str, str | None]:
     if m:
         return text[: m.start()].strip(), m.group(1).strip()
     return text, None
+
+
+async def _stream_llm_response(
+    context: list[dict],
+    max_new_tokens: int,
+    temperature: float,
+    tools: list | None,
+) -> AsyncGenerator[dict, None]:
+    """
+    Real-streaming wrapper over engine.generate_stream().
+
+    Handles two special cases transparently:
+      • <think>…</think>  → buffers block, emits {"type": "thinking", "content": "…"}
+                            then continues streaming the answer normally.
+      • <tool_call>…      → detected in the lookahead buffer; emits a single internal
+                            {"type": "_tool_detected", "text": full_response} event so
+                            the caller can run the tool without the user seeing raw JSON.
+
+    Normal text is emitted as {"type": "token", "content": delta}.
+
+    The caller owns the final assembly (persisting to DB, etc.).
+    """
+    # State: "lookahead" | "thinking" | "streaming" | "tool_call"
+    state = "lookahead"
+    buf = ""        # always accumulates the full raw output
+    think_buf = ""  # content inside <think>…</think>
+
+    async for delta in engine.generate_stream(context, max_new_tokens, temperature, tools):
+        buf += delta
+
+        if state == "lookahead":
+            # Early tool-call detection (model outputs <tool_call> right away)
+            if "<tool_call>" in buf:
+                state = "tool_call"
+                continue
+
+            # Detect thinking block start
+            stripped = buf.lstrip()
+            if stripped.startswith("<think>"):
+                state = "thinking"
+                think_buf = buf[buf.index("<think>") + 7:]
+                continue
+
+            # Keep buffering until we have enough chars to be confident
+            if len(buf) < _STREAM_LOOKAHEAD:
+                continue
+
+            # Committed: no tool call, no thinking — start streaming immediately
+            state = "streaming"
+            yield {"type": "token", "content": buf}
+
+        elif state == "thinking":
+            think_buf += delta
+            if "</think>" in think_buf:
+                end_idx = think_buf.index("</think>")
+                yield {"type": "thinking", "content": think_buf[:end_idx].strip()}
+                after = think_buf[end_idx + 8:].lstrip()
+                state = "streaming"
+                if after:
+                    yield {"type": "token", "content": after}
+
+        elif state == "streaming":
+            if "<tool_call>" in delta:
+                # Tool call arrived mid-stream (unusual but possible)
+                state = "tool_call"
+            else:
+                yield {"type": "token", "content": delta}
+
+        # "tool_call" state: silently accumulate into buf
+
+    # ── Stream ended ──────────────────────────────────────────────────────────
+    if state == "tool_call":
+        yield {"type": "_tool_detected", "text": buf}
+        return
+
+    if state == "lookahead":
+        # Very short response — didn't reach LOOKAHEAD threshold
+        if "<tool_call>" in buf:
+            yield {"type": "_tool_detected", "text": buf}
+            return
+        clean, thinking = _extract_thinking(buf)
+        if thinking:
+            yield {"type": "thinking", "content": thinking}
+        if clean:
+            yield {"type": "token", "content": clean}
+        return
+
+    if state == "thinking":
+        # Stream ended inside an unclosed <think> block
+        clean_think, remaining = think_buf, ""
+        if "</think>" in think_buf:
+            end_idx = think_buf.index("</think>")
+            clean_think = think_buf[:end_idx]
+            remaining = think_buf[end_idx + 8:].lstrip()
+        yield {"type": "thinking", "content": clean_think.strip()}
+        if remaining:
+            yield {"type": "token", "content": remaining}
 
 
 def create_conversation(data: ConversationCreate, user_id: int, session: Session) -> Conversation:
@@ -185,18 +281,43 @@ async def send_message_streaming(conversation_id: str, user_id: int, content: st
 
     for iteration in range(_MAX_TOOL_ITERATIONS):
         logger.info("stream_iter — conv=%s iter=%d ctx_msgs=%d", conversation_id, iteration, len(context))
+
+        streamed_parts: list[str] = []
+        tool_detected = False
+        tool_response_text = ""
+
         try:
-            response = await engine.generate(context, max_new_tokens, temperature, tools=tools)
+            async for event in _stream_llm_response(context, max_new_tokens, temperature, tools):
+                if event["type"] == "_tool_detected":
+                    tool_detected = True
+                    tool_response_text = event["text"]
+                elif event["type"] == "thinking":
+                    yield event  # forward thinking block to frontend
+                elif event["type"] == "token":
+                    streamed_parts.append(event["content"])
+                    yield event  # real vLLM token → forward immediately
         except Exception as exc:
             logger.error("stream_generate_error — conv=%s iter=%d", conversation_id, iteration, exc_info=True)
             yield {"type": "error", "error": f"Generation failed: {exc}"}
             return
-        logger.info("stream_generate_ok — conv=%s iter=%d resp_len=%d", conversation_id, iteration, len(response))
+
+        if not tool_detected:
+            # Final answer — tokens were already streamed to the client
+            final_text = "".join(streamed_parts)
+            logger.info("stream_done_no_tool — conv=%s iter=%d chars=%d", conversation_id, iteration, len(final_text))
+            break
+
+        # ── Tool call detected ──────────────────────────────────────────────
+        response = tool_response_text
+        logger.info("stream_generate_ok — conv=%s iter=%d resp_len=%d (tool)", conversation_id, iteration, len(response))
 
         tool_name, tool_args = parse_tool_call(response)
-
         if not tool_name:
-            final_text = response
+            # Couldn't parse — treat as final answer (emit what we have)
+            final_text, thinking = _extract_thinking(response)
+            if thinking:
+                yield {"type": "thinking", "content": thinking}
+            yield {"type": "token", "content": final_text}
             break
 
         yield {"type": "tool_call", "name": tool_name, "arguments": tool_args}
@@ -209,7 +330,7 @@ async def send_message_streaming(conversation_id: str, user_id: int, content: st
             tool_result = f"Tool error: {exc}"
         tool_calls_log.append({"name": tool_name, "arguments": tool_args, "result": tool_result})
 
-        # Detect UI action marker and emit as a separate SSE event before the result preview
+        # Detect UI action marker and emit as a separate SSE event
         try:
             result_data = json.loads(tool_result)
             if result_data.get("__ui_action__"):
@@ -226,25 +347,14 @@ async def send_message_streaming(conversation_id: str, user_id: int, content: st
         }
 
         formatted_result = model_config.tool_result_formatter(tool_name, tool_result)
-        # Strip thinking from intermediate assistant turns before adding to context
         clean_response, _ = _extract_thinking(response)
         context.append({"role": "assistant", "content": clean_response})
         context.append({"role": model_config.tool_result_role, "content": formatted_result})
     else:
         logger.warning("max_tool_iterations", extra={"conversation_id": conversation_id})
-        final_text = response  # noqa: F821
-
-    # Extract and emit thinking block, then stream clean text token by token
-    final_text, thinking = _extract_thinking(final_text)
-    if thinking:
-        yield {"type": "thinking", "content": thinking}
-
-    words = final_text.split(" ")
-    logger.info("stream_tokens — conv=%s word_count=%d", conversation_id, len(words))
-    for i, word in enumerate(words):
-        chunk = word + (" " if i < len(words) - 1 else "")
-        yield {"type": "token", "content": chunk}
-        await asyncio.sleep(_STREAM_WORD_DELAY)  # small delay so OS flushes each SSE frame individually
+        # Tokens of the last iteration were already streamed (or it was a tool call loop)
+        if not final_text and streamed_parts:
+            final_text = "".join(streamed_parts)
 
     assistant_msg = _save_message(conv.id, "assistant", final_text, session, tool_calls=tool_calls_log or None)
     _touch_conversation(conv, session)
