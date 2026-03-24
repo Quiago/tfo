@@ -619,15 +619,6 @@ export function ConnectorsModal({ open, onClose }: { open: boolean; onClose: () 
                         <span className="text-sm font-semibold text-zinc-800">Customize</span>
                     </div>
                     <nav className="flex flex-col gap-0.5 px-2">
-                        <button className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-zinc-500 hover:bg-zinc-200 transition-colors text-left">
-                            <span className="text-zinc-400">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
-                                    <rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
-                                </svg>
-                            </span>
-                            Skills
-                        </button>
                         <button className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium bg-white shadow-sm text-zinc-800 text-left">
                             <span className="text-zinc-600">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
