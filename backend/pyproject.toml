@@ -21,6 +21,7 @@ dependencies = [
     "ebooklib>=0.20",
     "sentence-transformers>=5.2.3",
     "autoawq>=0.2.9",
+    "aiosmtplib>=5.1.0",
 ]
 
 [dependency-groups]

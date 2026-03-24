@@ -56,12 +56,19 @@ class VLLMEngine:
         self._current_model_id: str | None = None
         self._swap_lock = asyncio.Lock()
 
-    async def load(self, model_id: str, dtype: str = "float32") -> None:
-        """Carga un modelo descargando el actual. Thread-safe via Lock."""
+    async def load(self, model_id: str, dtype: str = "float32", quantization: str | None = None) -> None:
+        """
+        Carga un modelo descargando el actual. Thread-safe via Lock.
+
+        quantization: si se pasa (ej. "awq"), el engine sabe que el modelo
+        requiere vLLM y NO intentará el fallback a transformers si vLLM falla
+        (los modelos AWQ no pueden cargarse con transformers+autoawq en versiones
+        recientes — autoawq está deprecado e incompatible con transformers>=4.52).
+        """
         import multiprocessing as _mp
         logger.info(
-            "[Engine] load() — model_id=%s dtype=%s CUDA=%s vLLM=%s multiproc=%s",
-            model_id, dtype, _CUDA_AVAILABLE, _VLLM_AVAILABLE,
+            "[Engine] load() — model_id=%s dtype=%s quant=%s CUDA=%s vLLM=%s multiproc=%s",
+            model_id, dtype, quantization, _CUDA_AVAILABLE, _VLLM_AVAILABLE,
             _mp.get_start_method(allow_none=True),
         )
         async with self._swap_lock:
@@ -69,13 +76,26 @@ class VLLMEngine:
                 await self._unload()
             if _VLLM_AVAILABLE and _CUDA_AVAILABLE:
                 try:
-                    await self._load_vllm(model_id, dtype)
+                    await self._load_vllm(model_id, dtype, quantization)
                 except Exception as exc:
+                    if quantization:
+                        # Quantized models (AWQ/GPTQ) cannot fall back to transformers.
+                        # autoawq is deprecated and incompatible with modern transformers.
+                        logger.error(
+                            "[Engine] vLLM falló para modelo cuantizado (%s). "
+                            "Los modelos AWQ/GPTQ requieren vLLM — NO hay fallback a transformers. "
+                            "Causas comunes:\n"
+                            "  • VRAM ocupada por proceso zombie: ejecuta 'fuser /dev/nvidia*' para identificarlo\n"
+                            "  • Reinicia el pod o mata el proceso con 'kill -9 <PID>'\n"
+                            "  • VRAM insuficiente: reduce gpu_memory_utilization\n"
+                            "  • Versión CUDA incompatible con esta versión de vLLM",
+                            exc,
+                            exc_info=True,
+                        )
+                        raise  # re-raise so service.py logs it correctly
                     logger.warning(
                         "[Engine] vLLM falló al inicializar (%s). "
-                        "Causa común: VRAM insuficiente, versión CUDA incompatible, "
-                        "o proceso vLLM terminado inesperadamente. "
-                        "Intentando fallback con transformers...",
+                        "Intentando fallback con transformers (solo para modelos no cuantizados)...",
                         exc,
                         exc_info=True,
                     )
@@ -97,7 +117,7 @@ class VLLMEngine:
         if _CUDA_AVAILABLE:
             torch.cuda.empty_cache()
 
-    async def _load_vllm(self, model_id: str, dtype: str) -> None:
+    async def _load_vllm(self, model_id: str, dtype: str, quantization: str | None = None) -> None:
         """Carga el modelo con vLLM AsyncLLMEngine (GPU)."""
         from vllm import AsyncEngineArgs, AsyncLLMEngine
         os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
@@ -105,13 +125,20 @@ class VLLMEngine:
         if torch.cuda.is_available():
             free, total = torch.cuda.mem_get_info()
             logger.info(f"[Engine] VRAM libre antes de cargar: {free/1024**3:.1f}/{total/1024**3:.1f} GiB")
+            free_gib = free / 1024**3
+            if free_gib < 2.0:
+                logger.warning(
+                    "[Engine] VRAM libre muy baja (%.1f GiB). Posible proceso zombie GPU. "
+                    "Ejecuta 'fuser /dev/nvidia*' para identificarlo y 'kill -9 <PID>' para liberarlo.",
+                    free_gib,
+                )
 
         model_path = MODELS_DIR / model_id
         num_gpus = max(torch.cuda.device_count(), 1)
         args = AsyncEngineArgs(
             model=str(model_path),
             dtype=dtype,
-            quantization="awq",            # Explicit AWQ quantization hint
+            quantization=quantization,     # None for non-quantized, "awq"/"gptq" for quantized
             gpu_memory_utilization=0.85,   # More headroom for KV cache (was 0.75)
             max_model_len=8192,            # Realistic for T4 16GB with 7-10B models (was 32768)
             enforce_eager=False,           # Enable CUDA Graphs for 30-40% throughput gain (was True)

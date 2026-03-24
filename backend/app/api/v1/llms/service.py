@@ -227,7 +227,7 @@ async def load_model(model_id: str) -> None:
     # Delegamos el swap al engine (que maneja el Lock internamente)
     config = CATALOG[model_id]
     try:
-        await engine.load(model_id, config.dtype)
+        await engine.load(model_id, config.dtype, quantization=config.quantization)
     except Exception as exc:
         logger.error("[LLMs] engine.load failed for %s: %s", model_id, exc, exc_info=True)
         raise HTTPException(
