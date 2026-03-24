@@ -62,11 +62,21 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # On shutdown: stop poller, cancel startup if still in progress, then wait cleanly.
+    # ── ON SHUTDOWN ──────────────────────────────────────────────────────────
+    # Detener poller de telemetría
     poller.stop()
+    
+    # Cancelar la tarea de startup si por algún motivo no terminó
     startup_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await startup_task
+        
+    # Limpiar el motor de LLMs y liberar la VRAM (¡EL CAMBIO NUEVO!)
+    try:
+        await llm_service.shutdown()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Error durante el apagado del LLM: {e}")
 
 
 # ── Activity tracker ──────────────────────────────────────────────────────────

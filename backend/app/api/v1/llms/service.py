@@ -236,6 +236,21 @@ async def load_model(model_id: str) -> None:
         )
     _save_state(model_id)
 
+async def shutdown() -> None:
+    """
+    Se ejecuta al apagar el servidor.
+    Fuerza la descarga del modelo y limpia la VRAM para evitar procesos zombie.
+    """
+    logger.info("[LLMs] Shutting down: Unloading engine and clearing VRAM...")
+    if engine.is_ready:
+        await engine._unload()
+    
+    # Forzamos recolección de basura adicional por seguridad
+    import gc
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
 
 def get_catalog() -> CatalogResponse:
     """Devuelve el catálogo completo con el estado actual de cada modelo."""
@@ -307,3 +322,4 @@ def get_health() -> HealthResponse:
         }
 
     return health
+
