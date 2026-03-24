@@ -247,8 +247,10 @@ async def _analyze_selected_range(
     start_ms = screen_context.date_range_start
     end_ms = screen_context.date_range_end
     logger.info("tool — analyze_selected_range %s → %s", fmt(start_ms), fmt(end_ms))
+    # No connector_id filter — the timeline chart also queries without it, mixing
+    # startup backfill data (connector_id="_startup_") with live OPC UA readings.
     stats = get_statistics_absolute(session, signal_ids=[], start_ms=start_ms, end_ms=end_ms,
-                                    connector_id=screen_context.active_connector_id)
+                                    connector_id=None)
     if not stats:
         return json.dumps({
             "range_start": fmt(start_ms), "range_end": fmt(end_ms),
